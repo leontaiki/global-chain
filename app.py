@@ -10,7 +10,7 @@ Global Chain — Macro Intelligence Dashboard
 
 依存: streamlit, feedparser のみ（どちらもpipで一発）。
 APIキーは不要。記事の分類・波及セクター・要約はすべてローカルで完結します。
-（本物のAI日本語要約をしたい場合は、末尾の「Claude API連携(任意)」を参照）
+（高品質なAI要約をしたい場合は、サイドバーの「AI要約（Gemini API）」を参照）
 """
 
 import re
@@ -399,18 +399,18 @@ def copy_button(text: str, key: str, label: str = "📋 プロンプトをコピ
 
 
 # =============================================================================
-# 3b. Claude API による本物の要約（任意・有料）
+# 3b. Gemini API による本物の要約（任意・無料枠あり）
 #     企画書 "Global Chain Radio" の固定フォーマットで、グローバルチェーン視点で再構成する。
 # =============================================================================
 
-@st.cache_data(ttl=86400, show_spinner=False)  # 同一テキストは24時間キャッシュ（課金抑制）
-def claude_analysis(text: str, title: str, api_key: str, model: str):
+@st.cache_data(ttl=86400, show_spinner=False)  # 同一テキストは24時間キャッシュ（呼び出し抑制）
+def gemini_analysis(text: str, title: str, api_key: str, model: str):
     """記事を Global Chain Radio 形式に再構成して返す。
     戻り値: dict(theme, takeaways[3], essence, sectors[]) または {'error': ...}"""
     try:
-        from anthropic import Anthropic
+        import google.generativeai as genai
     except ImportError:
-        return {"error": "anthropic 未インストール（ターミナルで pip3 install anthropic）"}
+        return {"error": "google-generativeai 未インストール（pip install google-generativeai）"}
     if not api_key:
         return {"error": "APIキーが未設定です（サイドバーで入力してください）"}
 
@@ -440,14 +440,13 @@ def claude_analysis(text: str, title: str, api_key: str, model: str):
 本文: {text[:5000]}
 """
     try:
-        client = Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model=model, max_tokens=900,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        genai.configure(api_key=api_key)
+        gm = genai.GenerativeModel(model, system_instruction=system)
+        resp = gm.generate_content(
+            user,
+            generation_config={"temperature": 0.4, "max_output_tokens": 900},
         )
-        out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-        out = out.replace("```json", "").replace("```", "").strip()
+        out = (resp.text or "").replace("```json", "").replace("```", "").strip()
         import json
         return json.loads(out)
     except Exception as ex:  # noqa: BLE001
@@ -569,21 +568,22 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.subheader("🤖 AI要約（Claude API）")
+    st.subheader("🤖 AI要約（Gemini API）")
     use_ai = st.toggle("本物のAI要約をONにする", value=False,
-                       help="グローバルチェーン視点で記事を再構成します。記事を開くたびにAPI料金がかかります。")
+                       help="グローバルチェーン視点で記事を再構成します。Gemini無料枠（1日1,500回）の範囲なら無料です。")
     api_key = ""
-    ai_model = "claude-haiku-4-5-20251001"
+    ai_model = "gemini-2.5-flash"
     if use_ai:
         import os as _os
-        api_key = st.text_input("ANTHROPIC_API_KEY", type="password",
-                                value=_os.environ.get("ANTHROPIC_API_KEY", ""),
-                                help="環境変数 ANTHROPIC_API_KEY があれば自動入力されます。")
+        api_key = st.text_input("GEMINI_API_KEY", type="password",
+                                value=_os.environ.get("GEMINI_API_KEY", ""),
+                                help="Google AI Studio (aistudio.google.com) で無料発行。環境変数 GEMINI_API_KEY があれば自動入力されます。")
         ai_model = st.selectbox("モデル",
-                                ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8"],
+                                ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
                                 index=0,
-                                help="Haiku=安価・高速 / Sonnet・Opus=高品質・高価")
-        st.caption("⚠️ 記事を開くと1件ずつ課金されます。Haiku推奨。")
+                                help="無料枠はFlash系のみ。Flash=高品質 / Flash-Lite=高速・軽量")
+        st.caption("💡 無料枠（1日1,500回・毎分15回）の範囲なら課金なし。"
+                   "ただし無料枠は入力がGoogleのモデル改善に使われる場合があります。")
 
 # ---- 記事の取得・分類 ----
 active_feeds = [f for f in st.session_state.feeds if f["name"] in active]
@@ -755,13 +755,13 @@ for idx, a in enumerate(all_articles):
             elif not body_text and link and not is_free_fulltext(link):
                 st.caption("※ このメディアは有料の壁、またはGoogle News経由のリンクのため全文取得の対象外です（RSS概要のみ）。")
 
-            # === AI要約モード（Claude API） ===
+            # === AI要約モード（Gemini API） ===
             if use_ai:
                 if not api_key:
-                    st.info("サイドバーで ANTHROPIC_API_KEY を入力するとAI要約が有効になります。")
+                    st.info("サイドバーで GEMINI_API_KEY を入力するとAI要約が有効になります。")
                 else:
                     with st.spinner("Global Chain Radio 形式で分析中…"):
-                        result = claude_analysis(analysis_text, a["title"], api_key, ai_model)
+                        result = gemini_analysis(analysis_text, a["title"], api_key, ai_model)
                     if "error" in result:
                         st.error(f"AI要約エラー: {result['error']}")
                     else:
