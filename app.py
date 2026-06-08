@@ -16,10 +16,12 @@ APIキーは不要。記事の分類・波及セクター・要約はすべて�
 import re
 import html
 import time
+import json
 import datetime as dt
 from collections import defaultdict
 
 import streamlit as st
+import streamlit.components.v1 as components
 import feedparser
 
 
@@ -370,6 +372,32 @@ def build_llm_prompt(title: str, text: str, link: str) -> str:
 """
 
 
+def copy_button(text: str, key: str, label: str = "📋 プロンプトをコピー"):
+    """クリックでクリップボードにコピーするボタン（標準コンポーネントで実装）。"""
+    payload = json.dumps(text)  # 改行・引用符を安全にJSへ
+    components.html(f"""
+    <button id="btn_{key}" style="
+        font-family: -apple-system, sans-serif; font-size: 14px; font-weight: 600;
+        color: #fdfbf6; background: #8a3a2e; border: none; border-radius: 6px;
+        padding: 9px 16px; cursor: pointer; width: 100%;">
+      {label}
+    </button>
+    <script>
+      const b = document.getElementById("btn_{key}");
+      b.addEventListener("click", async () => {{
+        try {{
+          await navigator.clipboard.writeText({payload});
+          b.textContent = "✅ コピーしました！";
+          b.style.background = "#2e7d32";
+          setTimeout(() => {{ b.textContent = "{label}"; b.style.background = "#8a3a2e"; }}, 1800);
+        }} catch (e) {{
+          b.textContent = "コピー失敗（手動で選択してください）";
+        }}
+      }});
+    </script>
+    """, height=48)
+
+
 # =============================================================================
 # 3b. Claude API による本物の要約（任意・有料）
 #     企画書 "Global Chain Radio" の固定フォーマットで、グローバルチェーン視点で再構成する。
@@ -523,6 +551,9 @@ with st.sidebar:
     sector_options = ["すべて"] + [f"{jp}（{m['en']}）" for jp, m in SECTORS.items()]
     selected_sector = st.selectbox("表示するセクター", sector_options)
 
+    sort_order = st.selectbox("並び順",
+                              ["新しい順", "セクター別", "全文取得できる順"])
+
     max_per_feed = st.slider("各メディアの最大記事数", 3, 30, 10)
     if st.button("🔄 最新を再取得", use_container_width=True):
         st.cache_data.clear()
@@ -564,8 +595,15 @@ for f in active_feeds:
         e["primary"] = scores[0][0] if scores else "未分類"
         all_articles.append(e)
 
-# 新しい順
+# まず新しい順に並べる（以降の並び替えは安定ソートなので、各グループ内は新しい順が保たれる）
 all_articles.sort(key=lambda x: x["published"], reverse=True)
+
+if sort_order == "セクター別":
+    _order = {s: i for i, s in enumerate(SECTORS)}
+    all_articles.sort(key=lambda x: _order.get(x["primary"], 999))
+elif sort_order == "全文取得できる順":
+    all_articles.sort(key=lambda x: not is_free_fulltext(x["link"]))
+# 「新しい順」はそのまま
 
 # セクターフィルタ適用
 if selected_sector != "すべて":
@@ -609,7 +647,17 @@ if "fulltext" not in st.session_state:
     st.session_state.fulltext = set()
 
 # ---- 記事カード一覧 ----
+_current_sector = None
 for idx, a in enumerate(all_articles):
+    # セクター別表示のときは、グループの切れ目に見出しを出す
+    if sort_order == "セクター別" and a["primary"] != _current_sector:
+        _current_sector = a["primary"]
+        _c = SECTORS.get(_current_sector, {}).get("color", "#888")
+        st.markdown(
+            f'<h3 style="margin:18px 0 6px 0;border-bottom:2px solid {_c};'
+            f'display:inline-block;padding-bottom:2px;">{_current_sector}</h3>',
+            unsafe_allow_html=True)
+
     link = a["link"]
     teaser = a["summary"]
 
@@ -707,11 +755,13 @@ for idx, a in enumerate(all_articles):
 
                 # Gemini / ChatGPT 等に貼り付けて、無料で「翻訳＋GCR形式要約」を作るためのプロンプト
                 st.markdown("**🤖 無料で翻訳＋要約（Gemini / ChatGPT 用）**")
-                if st.checkbox("貼り付け用プロンプトを表示", key=f"pp_{idx}"):
-                    prompt_text = body_text if body_text else teaser
-                    st.caption("右上のコピーアイコンで全文コピー → Gemini や ChatGPT に貼り付けてください。"
-                               "全文取得済みの記事ほど、訳・要約の質が上がります。")
-                    st.code(build_llm_prompt(a["title"], prompt_text, link), language="text")
+                prompt_text = body_text if body_text else teaser
+                full_prompt = build_llm_prompt(a["title"], prompt_text, link)
+                copy_button(full_prompt, key=str(idx))
+                st.caption("コピー → Gemini や ChatGPT に貼り付けるだけ。"
+                           "全文取得済みの記事ほど、訳・要約の質が上がります。")
+                if st.checkbox("プロンプトの中身を見る", key=f"pp_{idx}"):
+                    st.code(full_prompt, language="text")
 
                 if link:
                     st.markdown(f"[原文を読む ↗]({link})")
