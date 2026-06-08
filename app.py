@@ -183,6 +183,21 @@ def _upgrade_image_res(url: str) -> str:
     return url or ""
 
 
+def _clean_feed_summary(raw_html: str) -> str:
+    """RSS概要から『関連記事リンク』teaserを除去してから本文テキスト化する。
+    Guardian等は概要に『… – in pictures』『full list of winners』等のリンクを混ぜるため、
+    そうしたリンク(<a>)だけを狙って除去する（本文の文章は残す）。"""
+    s = raw_html or ""
+    # 「Continue reading」以降（関連リンクの塊が続くことが多い）を切り落とす
+    s = re.split(r"continue reading", s, flags=re.I)[0]
+    # teaser的な語を含む <a>...</a> リンクを丸ごと削除
+    teaser = (r"in pictures|full list|– video|\bvideo\b|explained|live updates|"
+              r"as it happened|in charts|\bquiz\b|crossword|gallery|best of the show")
+    s = re.sub(rf'<a\b[^>]*>(?:(?!</a>).)*?(?:{teaser})(?:(?!</a>).)*?</a>',
+               ' ', s, flags=re.S | re.I)
+    return _strip_html(s)
+
+
 @st.cache_data(ttl=900, show_spinner=False)  # 15分キャッシュ
 def fetch_feed(url: str):
     """単一フィードを取得して (記事リスト, ステータス文字列) を返す。
@@ -199,7 +214,7 @@ def fetch_feed(url: str):
             entries.append({
                 "title": e.get("title", "(no title)"),
                 "link": e.get("link", ""),
-                "summary": _strip_html(e.get("summary", e.get("description", ""))),
+                "summary": _clean_feed_summary(e.get("summary", e.get("description", ""))),
                 "published": _parse_time(e),
                 "image": _extract_entry_image(e),
             })
