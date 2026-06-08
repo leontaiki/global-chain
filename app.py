@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-Global Chain — Macro Intelligence Dashboard
-============================================
-世界のトップメディアのRSSを集約し、18セクターへ自動分類する自分専用ダッシュボード。
+Global Chain — Macro Intelligence Dashboard (Gemini Free Tier Optimized)
+========================================================================
+世界の主要メディアのRSSを集約し、18セクターへ自動分類・市場への因果の連鎖を紡ぐ
+マクロ／インデックス投資家向け自分用ダッシュボード。
 
 実行方法:
-    pip install streamlit feedparser
+    pip install -r requirements.txt
     streamlit run app.py
-
-依存: streamlit, feedparser のみ（どちらもpipで一発）。
-APIキーは不要。記事の分類・波及セクター・要約はすべてローカルで完結します。
-（本物のAI日本語要約をしたい場合は、末尾の「Claude API連携(任意)」を参照）
 """
 
 import re
 import html
 import time
 import json
+import os
 import datetime as dt
 from collections import defaultdict
 
@@ -24,112 +22,68 @@ import streamlit as st
 import streamlit.components.v1 as components
 import feedparser
 
-
 # =============================================================================
 # 1. 初期設定 — RSSフィードと18セクターの定義
 # =============================================================================
 
-# --- 主要メディアのRSS URL（初期サンプル） -----------------------------------
-# サイドバーから自由に追加・削除できます。
-# ★印 = 直リンクで本文の「全文取得」が効く無料メディア。
-# （無印 = ペイウォール等のため概要のみ。Google News経由のため全文取得は対象外）
 DEFAULT_FEEDS = [
-    # ★ 全文取得が効く無料・直リンクメディア（要約・分類の質が高い）
     {"name": "The Guardian – World", "url": "https://www.theguardian.com/world/rss"},
     {"name": "BBC – World",          "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
     {"name": "BBC – Business",       "url": "https://feeds.bbci.co.uk/news/business/rss.xml"},
     {"name": "NPR – World",          "url": "https://feeds.npr.org/1004/rss.xml"},
     {"name": "Al Jazeera",           "url": "https://www.aljazeera.com/xml/rss/all.xml"},
     {"name": "NYT – World",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"},
-    # 概要のみ（マクロ・金融の見出しカバー用。本文はペイウォール）
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
     {"name": "Reuters (見出しのみ)", "url": "https://news.google.com/rss/search?q=when:24h+site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Bloomberg (見出しのみ)", "url": "https://news.google.com/rss/search?q=when:24h+site:bloomberg.com&hl=en-US&gl=US&ceid=US:en"},
 ]
-# 注: The Guardian と NPR は本文が完全無料で取得しやすく、全文取得の主力です。
-#     BBC・Al Jazeera も多くが取得可。NYT はメーター制のため記事により部分取得。
-#     FT/Bloomberg/Economist は本文ペイウォールのため概要のみ運用です。
 
-
-# --- 18セクター定義 -----------------------------------------------------------
-# 企画書 "Global Chain Radio" の全18分野。
-# keywords: 記事の見出し・本文から拾う英語/日本語キーワード（小文字で照合）
 SECTORS = {
-    "政治":       {"en": "Politics",      "color": "#c0392b",
-                   "keywords": ["election", "parliament", "congress", "senate", "vote", "democracy",
-                                "policy", "government", "minister", "president", "coalition", "populis",
-                                "referendum", "政治", "選挙", "政権"]},
-    "経済":       {"en": "Economy",       "color": "#d35400",
-                   "keywords": ["inflation", "gdp", "recession", "growth", "unemployment", "wages",
-                                "consumer", "cpi", "deflation", "stimulus", "tariff", "trade deficit",
-                                "経済", "物価", "景気"]},
-    "金融":       {"en": "Finance",       "color": "#e67e22",
-                   "keywords": ["fed", "central bank", "rate", "yield", "bond", "treasury", "dollar",
-                                "currency", "stock", "equit", "credit", "bank", "liquidity", "ipo",
-                                "hedge fund", "金利", "為替", "債券", "株"]},
-    "保険":       {"en": "Insurance",     "color": "#16a085",
-                   "keywords": ["insurance", "insurer", "reinsur", "actuari", "premium", "underwrit",
-                                "claims", "pension fund", "保険", "年金"]},
-    "医療":       {"en": "Healthcare",    "color": "#27ae60",
-                   "keywords": ["healthcare", "hospital", "drug", "pharma", "fda", "clinical", "patient",
-                                "medicine", "therapy", "biotech", "vaccine", "医療", "病院", "薬"]},
-    "公衆衛生":   {"en": "Public Health",  "color": "#2ecc71",
-                   "keywords": ["pandemic", "epidemic", "outbreak", "obesity", "mental health", "who",
-                                "public health", "disease", "infection", "感染", "公衆衛生"]},
-    "食糧":       {"en": "Food",          "color": "#f1c40f",
-                   "keywords": ["wheat", "grain", "food security", "crop", "harvest", "famine",
-                                "fertilizer", "commodity", "食糧", "穀物", "小麦"]},
-    "農業":       {"en": "Agriculture",   "color": "#a4b400",
-                   "keywords": ["farm", "agricultur", "irrigation", "livestock", "soybean", "subsid",
-                                "land use", "農業", "農地"]},
-    "エネルギー": {"en": "Energy",         "color": "#e74c3c",
-                   "keywords": ["oil", "gas", "opec", "crude", "lng", "nuclear", "renewable", "solar",
-                                "wind power", "grid", "electricity", "power plant", "uranium",
-                                "石油", "原子力", "電力", "エネルギー"]},
-    "テック":     {"en": "Technology",    "color": "#3498db",
-                   "keywords": ["ai", "artificial intelligence", "semiconductor", "chip", "nvidia",
-                                "cloud", "data center", "software", "tech", "quantum", "robot",
-                                "半導体", "クラウド"]},
-    "宇宙":       {"en": "Space",         "color": "#34495e",
-                   "keywords": ["satellite", "space", "spacex", "nasa", "orbit", "rocket", "launch",
-                                "gps", "starlink", "衛星", "宇宙"]},
-    "軍事":       {"en": "Military",      "color": "#7f8c8d",
-                   "keywords": ["military", "defense", "defence", "weapon", "missile", "army", "navy",
-                                "war", "conflict", "nato", "troops", "arms", "軍", "兵器", "防衛"]},
-    "外交":       {"en": "Diplomacy",     "color": "#2980b9",
-                   "keywords": ["diplomacy", "summit", "treaty", "sanction", "alliance", "bilateral",
-                                "embassy", "negotiation", "g7", "g20", "外交", "制裁", "条約"]},
-    "不動産":     {"en": "Real Estate",   "color": "#8e44ad",
-                   "keywords": ["real estate", "property", "housing", "mortgage", "office vacancy",
-                                "reit", "rent", "construction", "不動産", "住宅"]},
-    "アート":     {"en": "Art",           "color": "#9b59b6",
-                   "keywords": ["art", "auction", "sotheby", "christie", "museum", "gallery", "painting",
-                                "美術", "アート"]},
-    "ファッション":{"en": "Fashion",       "color": "#e84393",
-                   "keywords": ["fashion", "luxury", "lvmh", "apparel", "cotton", "textile", "brand",
-                                "ファッション", "ブランド"]},
-    "カルチャー": {"en": "Culture",       "color": "#fd79a8",
-                   "keywords": ["culture", "anime", "k-pop", "kpop", "film", "movie", "game", "gaming",
-                                "streaming", "music", "soft power", "文化", "アニメ"]},
-    "地域":       {"en": "Local",         "color": "#636e72",
-                   "keywords": ["rural", "aging", "depopulation", "local economy", "vacant", "decline",
-                                "regional", "地方", "高齢化", "過疎"]},
+    "政治":       {"en": "Politics",      "color": "#c0392b", "macro_weight": 1,
+                   "keywords": ["election", "parliament", "congress", "senate", "vote", "democracy", "policy", "government", "minister", "president", "coalition", "populis", "referendum", "政治", "選挙", "政権"]},
+    "経済":       {"en": "Economy",       "color": "#d35400", "macro_weight": 1,
+                   "keywords": ["inflation", "gdp", "recession", "growth", "unemployment", "wages", "consumer", "cpi", "deflation", "stimulus", "tariff", "trade deficit", "経済", "物価", "景気"]},
+    "金融":       {"en": "Finance",       "color": "#e67e22", "macro_weight": 1,
+                   "keywords": ["fed", "central bank", "rate", "yield", "bond", "treasury", "dollar", "currency", "stock", "equit", "credit", "bank", "liquidity", "ipo", "hedge fund", "金利", "為替", "債券", "株"]},
+    "保険":       {"en": "Insurance",     "color": "#16a085", "macro_weight": 0,
+                   "keywords": ["insurance", "insurer", "reinsur", "actuari", "premium", "underwrit", "claims", "pension fund", "保険", "年金"]},
+    "医療":       {"en": "Healthcare",    "color": "#27ae60", "macro_weight": 0,
+                   "keywords": ["healthcare", "hospital", "drug", "pharma", "fda", "clinical", "patient", "medicine", "therapy", "biotech", "vaccine", "医療", "病院", "薬"]},
+    "公衆衛生":   {"en": "Public Health",  "color": "#2ecc71", "macro_weight": 0,
+                   "keywords": ["pandemic", "epidemic", "outbreak", "obesity", "mental health", "who", "public health", "disease", "infection", "感染", "公衆衛生"]},
+    "食糧":       {"en": "Food",          "color": "#f1c40f", "macro_weight": 1,
+                   "keywords": ["wheat", "grain", "food security", "crop", "harvest", "famine", "fertilizer", "commodity", "食糧", "穀物", "小麦"]},
+    "農業":       {"en": "Agriculture",   "color": "#a4b400", "macro_weight": 0,
+                   "keywords": ["farm", "agricultur", "irrigation", "livestock", "soybean", "subsid", "land use", "農業", "農地"]},
+    "エネルギー": {"en": "Energy",         "color": "#e74c3c", "macro_weight": 1,
+                   "keywords": ["oil", "gas", "opec", "crude", "lng", "nuclear", "renewable", "solar", "wind power", "grid", "electricity", "power plant", "uranium", "石油", "原子力", "電力", "エネルギー"]},
+    "テック":     {"en": "Technology",    "color": "#3498db", "macro_weight": 1,
+                   "keywords": ["ai", "artificial intelligence", "semiconductor", "chip", "nvidia", "cloud", "data center", "software", "tech", "quantum", "robot", "半導体", "クラウド"]},
+    "宇宙":       {"en": "Space",         "color": "#34495e", "macro_weight": 0,
+                   "keywords": ["satellite", "space", "spacex", "nasa", "orbit", "rocket", "launch", "gps", "starlink", "衛星", "宇宙"]},
+    "軍事":       {"en": "Military",      "color": "#7f8c8d", "macro_weight": 1,
+                   "keywords": ["military", "defense", "defence", "weapon", "missile", "army", "navy", "war", "conflict", "nato", "troops", "arms", "軍", "兵器", "防衛"]},
+    "外交":       {"en": "Diplomacy",     "color": "#2980b9", "macro_weight": 1,
+                   "keywords": ["diplomacy", "summit", "treaty", "sanction", "alliance", "bilateral", "embassy", "negotiation", "g7", "g20", "外交", "制裁", "条約"]},
+    "不動産":     {"en": "Real Estate",   "color": "#8e44ad", "macro_weight": 0,
+                   "keywords": ["real estate", "property", "housing", "mortgage", "office vacancy", "reit", "rent", "construction", "不動産", "住宅"]},
+    "アート":     {"en": "Art",           "color": "#9b59b6", "macro_weight": 0,
+                   "keywords": ["art", "auction", "sotheby", "christie", "museum", "gallery", "painting", "美術", "アート"]},
+    "ファッション":{"en": "Fashion",       "color": "#e84393", "macro_weight": 0,
+                   "keywords": ["fashion", "luxury", "lvmh", "apparel", "cotton", "textile", "brand", "ファッション", "ブランド"]},
+    "カルチャー": {"en": "Culture",       "color": "#fd79a8", "macro_weight": 0,
+                   "keywords": ["culture", "anime", "k-pop", "kpop", "film", "movie", "game", "gaming", "streaming", "music", "soft power", "文化", "アニメ"]},
+    "地域":       {"en": "Local",         "color": "#636e72", "macro_weight": 0,
+                   "keywords": ["rural", "aging", "depopulation", "local economy", "vacant", "decline", "regional", "地方", "高齢化", "過疎"]},
 }
 
-
 # =============================================================================
-# 2. RSS取得（キャッシュ付き）
+# 2. RSS取得（キャッシュ・重複除去・SSL設定）
 # =============================================================================
 
-# 多くのメディア（Google News, NYT 等）は名乗り(User-Agent)が無いと
-# アクセスを弾くため、ブラウザらしいヘッダを付けて取得する。
-_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-       "AppleWebKit/537.36 (KHTML, like Gecko) "
-       "Chrome/124.0 Safari/537.36")
+_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-# Mac等でよく起きる SSL: CERTIFICATE_VERIFY_FAILED を防ぐため、
-# certifi のルート証明書を使ったSSLコンテキストを用意する。
 import ssl
 try:
     import certifi
@@ -137,11 +91,8 @@ try:
 except ImportError:
     _SSL_CTX = ssl.create_default_context()
 
-
-@st.cache_data(ttl=900, show_spinner=False)  # 15分キャッシュ
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_feed(url: str):
-    """単一フィードを取得して (記事リスト, ステータス文字列) を返す。
-    ステータスは None=正常、それ以外は理由（HTTPエラーや空など）。"""
     import urllib.request
     import urllib.error
     try:
@@ -158,613 +109,367 @@ def fetch_feed(url: str):
                 "published": _parse_time(e),
             })
         if not entries:
-            # 取得はできたが記事が0件 → 理由をできるだけ伝える
-            reason = "記事0件"
-            if getattr(parsed, "bozo", 0) and getattr(parsed, "bozo_exception", None):
-                reason += f"（解析警告: {parsed.bozo_exception}）"
-            return [], reason
+            return [], "記事0件"
         return entries, None
-    except urllib.error.HTTPError as ex:
-        return [], f"HTTP {ex.code}（アクセス拒否の可能性）"
-    except Exception as ex:  # noqa: BLE001
+    except Exception as ex:
         return [], str(ex)
 
-
-# 本文の全文取得を試みる「無料・直リンク」メディアのドメイン。
-# FT/Bloomberg/Economist/WSJ などのペイウォール、Google News経由のリンクは対象外。
-FREE_FULLTEXT_DOMAINS = (
-    "bbc.co.uk", "bbc.com", "nytimes.com", "apnews.com",
-    "npr.org", "theguardian.com", "reuters.com", "aljazeera.com",
-)
-
+FREE_FULLTEXT_DOMAINS = ("bbc.co.uk", "bbc.com", "nytimes.com", "apnews.com", "npr.org", "theguardian.com", "reuters.com", "aljazeera.com")
 
 def is_free_fulltext(link: str) -> bool:
     from urllib.parse import urlparse
     host = urlparse(link).netloc.lower()
     return any(host == d or host.endswith("." + d) for d in FREE_FULLTEXT_DOMAINS)
 
-
-@st.cache_data(ttl=3600, show_spinner=False)  # 1時間キャッシュ
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_article_body(url: str):
-    """記事ページから本文を抽出して (本文テキスト, 理由) を返す。
-    取れなければ ('', 理由)。標準ライブラリのみで実装（依存を増やさない）。"""
     import urllib.request
     import urllib.error
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-            raw = resp.read(800_000)  # 先頭800KBまで（巨大ページ対策）
+            raw = resp.read(800_000)
         h = raw.decode("utf-8", errors="ignore")
-
-        # 1) og:description / meta description（記事の要旨が入っていることが多い）
+        
         meta = ""
-        m = re.search(
-            r'<meta[^>]+(?:property|name)=["\'](?:og:description|description)["\'][^>]*content=["\']([^"\']+)',
-            h, re.I)
-        if not m:
-            m = re.search(
-                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\'](?:og:description|description)',
-                h, re.I)
-        if m:
-            meta = html.unescape(m.group(1)).strip()
+        m = re.search(r'<meta[^>]+(property|name)=["'](og:description|description)["'][^>]*content=["']([^"']+)', h, re.I)
+        if m: meta = html.unescape(m.group(3)).strip()
 
-        # 2) <p> 段落のうち、ある程度の長さ（=本文らしい）ものだけ連結
         paras = re.findall(r"<p[^>]*>(.*?)</p>", h, re.S | re.I)
         body_parts = []
         for p in paras:
             t = html.unescape(re.sub(r"<[^>]+>", "", p)).strip()
-            if len(t) >= 40:
-                body_parts.append(t)
+            if len(t) >= 40: body_parts.append(t)
         body = " ".join(body_parts)
 
         combined = (meta + " " + body).strip() if meta else body
         if len(combined) < 80:
             return "", "本文を十分に抽出できませんでした（ペイウォール等の可能性）"
-        return combined[:6000], None  # 長すぎる場合は先頭6000字に制限
-    except urllib.error.HTTPError as ex:
-        return "", f"HTTP {ex.code}"
-    except Exception as ex:  # noqa: BLE001
+        return combined[:6000], None
+    except Exception as ex:
         return "", str(ex)
-
 
 def _strip_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text or "")
     return html.unescape(text).strip()
 
-
 def _parse_time(entry) -> dt.datetime:
     for key in ("published_parsed", "updated_parsed"):
         t = entry.get(key)
         if t:
-            try:
-                return dt.datetime.fromtimestamp(time.mktime(t))
-            except Exception:  # noqa: BLE001
-                pass
+            try: return dt.datetime.fromtimestamp(time.mktime(t))
+            except: pass
     return dt.datetime.min
 
-
 def _chip_text_color(hex_color: str) -> str:
-    """背景色の明るさから、読みやすい文字色（黒/白）を選ぶ。"""
     h = hex_color.lstrip("#")
-    try:
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    except (ValueError, IndexError):
-        return "#fdfbf6"
+    try: r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except: return "#fdfbf6"
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
     return "#1c1813" if luminance > 0.6 else "#fdfbf6"
 
-
-# =============================================================================
-# 3. セクター分類 & 投資仮説の「波及セクター」推定（ローカル・APIキー不要）
-# =============================================================================
-
 def classify_sectors(text: str):
-    """記事テキストを18セクターに対しスコアリングし、(sector, score) を降順で返す。"""
     low = text.lower()
     scores = []
     for jp, meta in SECTORS.items():
         score = 0
         for kw in meta["keywords"]:
             k = kw.lower()
-            # 英数字のみのキーワードは「単語の区切り」で一致（ai が AIDS に誤一致しないように）
             if re.fullmatch(r"[a-z0-9 \-]+", k):
-                score += len(re.findall(r"\b" + re.escape(k) + r"\b", low))
+                score += len(re.findall(r"" + re.escape(k) + r"", low))
             else:
-                # 日本語など（語境界の概念がない）は従来どおり部分一致
                 score += low.count(k)
         if score > 0:
             scores.append((jp, score))
     scores.sort(key=lambda x: x[1], reverse=True)
     return scores
 
-
-def heuristic_summary(text: str, n_lines: int = 3):
-    """読み込めた本文から要点文を抽出する簡易要約（オフライン）。
-    戻り値: (要約文字列, 状態) — 状態は 'ok' / 'thin'（本文が薄く要約困難）。
-    ※ これは英語原文から重要文を選んで文章化する抽出方式で、
-       『グローバルチェーン視点での再構成』は行いません（それはAI要約の役割）。"""
-    text = _strip_html(text)
-    sentences = re.split(r"(?<=[.!?。])\s+", text)
-
-    # 重複・ほぼ重複を除外しつつ、20字以上の文だけ残す
-    seen, uniq = set(), []
-    for s in sentences:
-        s = s.strip()
-        if len(s) < 20:
-            continue
-        key = re.sub(r"[^a-z0-9]+", "", s.lower())  # 句読点違いを同一視
-        if key and key not in seen:
-            seen.add(key)
-            uniq.append(s)
-
-    # 1文目（多くは見出しの再掲）が後続文と内容的に重なる場合は除く
-    if len(uniq) >= 2:
-        head_words = set(re.findall(r"[a-z0-9]+", uniq[0].lower()))
-        second_words = set(re.findall(r"[a-z0-9]+", uniq[1].lower()))
-        if head_words and len(head_words & second_words) / len(head_words) > 0.8:
-            uniq = uniq[1:]
-
-    # 使える文が1つ以下＝実質「見出しだけ」→ 正直に伝える
-    if len(uniq) <= 1:
-        only = uniq[0] if uniq else (text[:120] if text else "")
-        return only, "thin"
-
-    # 本文中で頻出する内容語（記事の主題語）を抽出し、それを多く含む文を重視
-    STOP = set("the a an and or but of to in on for with as at by from is are was were "
-               "be been being this that these those it its he she they we you i his her "
-               "their our your has have had will would can could said says say new more "
-               "than then so not no into over after before about up out".split())
-    words = [w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in STOP]
-    freq = {}
-    for w in words:
-        freq[w] = freq.get(w, 0) + 1
-
-    ranked = []
-    for i, s in enumerate(uniq):
-        sw = re.findall(r"[a-z]{4,}", s.lower())
-        topic = sum(freq.get(w, 0) for w in sw)
-        # 文の長さで正規化（長文の有利を抑える）＋ リード文を少し優遇
-        weight = topic / (len(sw) + 1) + max(0, 2 - i) * 0.5
-        ranked.append((weight, i, s))
-    ranked.sort(key=lambda x: (-x[0], x[1]))
-    top = sorted(ranked[:n_lines], key=lambda x: x[1])  # 元の順序へ
-    prose = " ".join(s.rstrip(".") + "." for _, _, s in top)  # 文章としてつなぐ
-    return prose, "ok"
-
-
-def hypothesis_hint(scores):
-    """波及セクター上位から、その記事固有の波及構造だけを示す（定型の決まり文句は付けない）。"""
-    if not scores:
-        return "明確なセクター波及は検出されませんでした。"
-    top = scores[0][0]
-    spill = [s for s, _ in scores[1:3]]
-    if spill:
-        return f"主軸は【{top}】、波及先は【{'・'.join(spill)}】。"
-    return f"主軸は【{top}】。"
-
-
-def build_llm_prompt(title: str, text: str, link: str) -> str:
-    """Gemini / ChatGPT / チャット版Claude に貼り付けるためのプロンプトを組み立てる。
-    日本語訳＋Global Chain Radio形式の要約を、追加課金なしで作ってもらうためのもの。"""
-    return f"""あなたは「Global Chain Radio」という英語ラジオ番組の編集者です。日本の医師が、政治・経済・金融・医療・公衆衛生・食糧・エネルギー・テック・軍事・外交・文化などを、歴史とグローバルなサプライチェーン（Chain）という一つの相互依存システムとして読み解く番組です。文体はThe Economist調で、密度が高く構造的です。
-
-以下の英語ニュースについて、次の形式で日本語で出力してください。
-
-【1. 全文の日本語訳】
-（本文を自然な日本語に訳す）
-
-【2. Today's Theme】
-（日常ニュースとマクロ視点を橋渡しする一文）
-
-【3. 3 Key Takeaways】
-（サプライチェーン・歴史・システムの観点から要点を3つ）
-
-【4. The Essence】
-（なぜ今このニュースがグローバルチェーン上で重要か。投資・臨床・政策の意思決定層に響く本質を、歴史的文脈を交えて）
-
-【5. 波及セクター】
-（影響が及ぶ分野を列挙）
-
----
-タイトル: {title}
-本文: {text}
-原文URL: {link}
-"""
-
-
-def copy_button(text: str, key: str, label: str = "📋 プロンプトをコピー"):
-    """クリックでクリップボードにコピーするボタン（標準コンポーネントで実装）。"""
-    payload = json.dumps(text)  # 改行・引用符を安全にJSへ
-    components.html(f"""
-    <button id="btn_{key}" style="
-        font-family: -apple-system, sans-serif; font-size: 14px; font-weight: 600;
-        color: #fdfbf6; background: #8a3a2e; border: none; border-radius: 6px;
-        padding: 9px 16px; cursor: pointer; width: 100%;">
-      {label}
-    </button>
-    <script>
-      const b = document.getElementById("btn_{key}");
-      b.addEventListener("click", async () => {{
-        try {{
-          await navigator.clipboard.writeText({payload});
-          b.textContent = "✅ コピーしました！";
-          b.style.background = "#2e7d32";
-          setTimeout(() => {{ b.textContent = "{label}"; b.style.background = "#8a3a2e"; }}, 1800);
-        }} catch (e) {{
-          b.textContent = "コピー失敗（手動で選択してください）";
-        }}
-      }});
-    </script>
-    """, height=48)
-
-
 # =============================================================================
-# 3b. Claude API による本物の要約（任意・有料）
-#     企画書 "Global Chain Radio" の固定フォーマットで、グローバルチェーン視点で再構成する。
+# 3. Gemini API 連携層 (無料枠・JSON Structured Output 最最適化)
 # =============================================================================
 
-@st.cache_data(ttl=86400, show_spinner=False)  # 同一テキストは24時間キャッシュ（課金抑制）
-def claude_analysis(text: str, title: str, api_key: str, model: str):
-    """記事を Global Chain Radio 形式に再構成して返す。
-    戻り値: dict(theme, takeaways[3], essence, sectors[]) または {'error': ...}"""
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        return {"error": "anthropic 未インストール（ターミナルで pip3 install anthropic）"}
+@st.cache_data(ttl=1800, show_spinner=False)
+def generate_macro_summary(articles_text: str, api_key: str):
     if not api_key:
-        return {"error": "APIキーが未設定です（サイドバーで入力してください）"}
+        return {
+            "regime": "API KEY REQUIRED",
+            "chain": "サイドバーで GEMINI_API_KEY を入力すると、今日動くべきかどうかのマクロ連鎖サマリーがここに自動生成されます。",
+            "action": "NO CHANGE"
+        }
+    
+    prompt = f"""
+    You are a world-class macro investor and a product designer like Steve Jobs. 
+    Analyze today's news headlines, filter out the noise, and extract the absolute essence for a long-term index investor.
+    Determine whether there is a true macro regime shift today or if investors should do nothing.
 
-    system = (
-        "You are the lead writer of 'Global Chain Radio', an English radio program produced "
-        "by a doctor in Japan. The program reads each day's news not as an isolated dot, but as "
-        "a point on the lines and planes of global supply chains and history. You connect "
-        "politics, economics, finance, health, food, energy, technology, space, the military, "
-        "diplomacy, and culture as one interdependent system (the 'Chain'). Your tone is dense, "
-        "structural, and analytical, in the style of The Economist. You always reframe a news "
-        "item by asking: where does this sit in the global chain, and what historical pattern "
-        "does it echo?"
-    )
-    user = f"""次の英語ニュースを、Global Chain Radio の固定フォーマットで日本語にまとめてください。
-単なる要約ではなく、『この出来事がサプライチェーン・歴史・システムのどこに位置するか』を構造的に示すこと。
+    CRITICAL RULES:
+    1. If there are no market-shaking macro events (e.g., major geopolitical conflicts, sudden rate surprises, systemic supply chain breakdowns), you MUST set "action" to "NO CHANGE".
+    2. When describing the "chain", trace the causal domino effect explicitly using arrows (➔), focusing on asset classes, inflation, rates, or macro variables.
 
-# 出力は JSON のみ（前置き・コードブロック・説明文は禁止）
-{{
-  "theme": "今日のテーマ（日常ニュースとマクロ視点を橋渡しする一文・40字以内）",
-  "takeaways": ["要点1（サプライチェーン/歴史/システムの観点・60字以内）", "要点2", "要点3"],
-  "essence": "なぜ今このニュースがグローバルチェーン上で重要か。投資・臨床・政策の意思決定層に響く本質（120字以内）",
-  "sectors": ["波及する分野を2〜4個（例: 軍事, エネルギー, 外交）"]
-}}
+    Respond STRICTLY in JSON format with the following keys. Do not wrap in markdown code blocks, do not write prose.
+    {{
+      "regime": "一言で表す現在の世界マクロ環境（例: 地政学リスク緊迫化 / リスクオン継続 / 利下げ織り込みなど）",
+      "chain": "今日最も注目すべきマクロの因果関係の連鎖（例: イラン衝突 ➔ 原油供給懸念 ➔ 原油↑ ➔ インフレ再燃懸念 ➔ 金利上昇圧力 ➔ リスクオフ株売り）",
+      "action": "投資家への一言（大きな地殻変動がない日は必ず 'NO CHANGE（投資方針に変更なし。本を読んで過ごしましょう）' とすること）"
+    }}
 
-# 記事
-タイトル: {title}
-本文: {text[:5000]}
-"""
+    【Today's Headlines】
+    {articles_text}
+    """
     try:
-        client = Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model=model, max_tokens=900,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
         )
-        out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-        out = out.replace("```json", "").replace("```", "").strip()
-        import json
-        return json.loads(out)
-    except Exception as ex:  # noqa: BLE001
-        return {"error": str(ex)}
+        return json.loads(response.text)
+    except Exception as e:
+        return {"regime": "分析エラー", "chain": f"同期エラーまたは取得失敗: {str(e)}", "action": "ERROR"}
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def gemini_analysis(text: str, title: str, api_key: str):
+    if not api_key:
+        return {"error": "APIキーが設定されていません。"}
+
+    prompt = f"""
+    You are the lead writer of 'Global Chain Radio', an analytical program inspired by The Economist.
+    Rewrite this news item not as an isolated event, but as a dynamic vector on the global supply chain and historical patterns.
+    
+    Respond STRICTLY in JSON format with the following structure. No prose outside the JSON.
+    {{
+      "theme": "日常ニュースとマクロ視点を橋渡しする一文（40字以内）",
+      "takeaways": [
+        "要点1（サプライチェーンやマクロシステムの観点・60字以内）",
+        "要点2",
+        "要点3"
+      ],
+      "chain_flow": "出来事から市場・コモディティ・金利等へ至る因果のドミノ効果（例: 地政学リスク ➔ 原油供給寸断 ➔ 原油価格↑ ➔ 物価上昇圧力 ➔ 金利高止まり ➔ 債券安・株売り）",
+      "essence": "投資・政策の意思決定層に真に響く、このニュースがグローバルシステム上で持つ本質的意味（120字以内）",
+      "sectors": ["波及する具体的なセクターを2〜4個（例: 軍事, エネルギー, 金融）"]
+    }}
+
+    Title: {title}
+    Body: {text[:5000]}
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+        return json.loads(response.text)
+    except Exception as ex:
+        return {"error": str(ex)}
 
 # =============================================================================
 # 4. 画面構成 — Streamlit UI
 # =============================================================================
 
-st.set_page_config(page_title="Global Chain — Macro Intelligence",
-                   page_icon="🌐", layout="wide")
+st.set_page_config(page_title="Global Chain — Macro Intelligence", page_icon="🌐", layout="wide")
 
-# ---- カスタムCSS（エディトリアル/ターミナル風の落ち着いた配色） ----
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Spectral:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
-/* ---- 全体：紙のようなクリーム背景 + インク色の文字 ---- */
 .stApp { background: #f4efe3; color: #23201a; }
 [data-testid="stMain"] { background: #f4efe3; }
 [data-testid="stSidebar"] { background: #ebe4d3; border-right: 1px solid #d8cfb8; }
-[data-testid="stSidebar"] * { color: #2c281f; }
-.stApp p, .stApp li, .stApp span, .stApp label, .stMarkdown { color: #3a342a; }
-
-h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #1c1813 !important;
-                 letter-spacing: .2px; }
-
-/* ---- ヘッダー ---- */
+h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #1c1813 !important; }
 .gc-title { font-size: 2.3rem; font-weight: 800; margin-bottom: 2px; color: #1c1813; }
-.gc-sub { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace;
-          font-size: .78rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 500; }
+.gc-sub { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .78rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 500; }
+.gc-chip { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: .68rem; padding: 3px 9px; border-radius: 3px; margin: 2px 4px 2px 0; font-weight: 600; }
+.gc-essence { background: #f3ece0; border: 1px solid #d8cdb4; border-left: 3px solid #8a3a2e; border-radius: 4px; padding: 13px 17px; margin-top: 10px; }
+.gc-essence b { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .7rem; letter-spacing: 1.5px; }
 
-/* ---- 記事カード：紙の上の一段明るいカード ---- */
-.gc-card { background: #fbf8f0; border: 1px solid #e0d7c2;
-           border-left: 3px solid #c9bfa6; border-radius: 4px;
-           padding: 14px 20px; margin-bottom: 10px;
-           box-shadow: 0 1px 2px rgba(60,50,30,.06); transition: border-color .15s; }
-.gc-card:hover { border-left-color: #8a3a2e; }
-.gc-source { font-family: 'IBM Plex Mono', monospace; font-size: .68rem;
-             color: #9a8f78; text-transform: uppercase; letter-spacing: 1.5px; }
-.gc-headline { font-family: 'Spectral', serif; font-size: 1.15rem; color: #1c1813;
-               line-height: 1.35; margin: 5px 0 0 0; font-weight: 600; }
+.macro-box { background: #1c1813; color: #f4efe3; padding: 20px; border-radius: 6px; margin: 15px 0 25px 0; border-left: 6px solid #8a3a2e; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+.macro-regime { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: #e67e22; letter-spacing: 2px; font-weight: bold; text-transform: uppercase; }
+.macro-chain { font-family: 'Spectral', serif; font-size: 1.4rem; font-weight: 700; margin: 8px 0; color: #f4efe3; line-height: 1.4; }
+.macro-action { font-size: 0.88rem; color: #bbaea1; border-top: 1px solid #332d24; padding-top: 8px; margin-top: 8px; }
 
-/* ---- セクターチップ ---- */
-.gc-chip { display: inline-block; font-family: 'IBM Plex Mono', monospace;
-           font-size: .68rem; padding: 3px 9px; border-radius: 3px; margin: 2px 4px 2px 0;
-           font-weight: 600; letter-spacing: .3px; }
-
-/* ---- THE ESSENCE ボックス ---- */
-.gc-essence { background: #f3ece0; border: 1px solid #d8cdb4;
-              border-left: 3px solid #8a3a2e; border-radius: 4px;
-              padding: 13px 17px; margin-top: 10px; }
-.gc-essence b { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .7rem;
-                letter-spacing: 1.5px; }
-.gc-essence { color: #3a342a; }
-
-/* ---- 区切り線を細いインク色に ---- */
-hr { border-color: #d8cfb8 !important; }
-
-/* ---- 記事＝展開バーを一体型カードに ---- */
-[data-testid="stExpander"] { background: #fbf8f0; border: 1px solid #e0d7c2 !important;
-                             border-left: 3px solid #8a3a2e !important; border-radius: 4px;
-                             margin-bottom: 9px; box-shadow: 0 1px 2px rgba(60,50,30,.06); }
-[data-testid="stExpander"] summary { padding: 12px 16px; }
-[data-testid="stExpander"] summary p { font-family: 'Spectral', serif !important;
-                                       font-size: 1.12rem !important; font-weight: 600 !important;
-                                       color: #1c1813 !important; line-height: 1.35; }
-[data-testid="stExpander"] summary:hover p { color: #8a3a2e !important; }
-
+[data-testid="stExpander"] { background: #fbf8f0; border: 1px solid #e0d7c2 !important; border-left: 3px solid #8a3a2e !important; border-radius: 4px; margin-bottom: 9px; }
+[data-testid="stExpander"] summary p { font-family: 'Spectral', serif !important; font-size: 1.12rem !important; font-weight: 600 !important; color: #1c1813 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="gc-sub">A DOCTOR IN JAPAN READS THE WORLD AS ONE SYSTEM</div>',
-            unsafe_allow_html=True)
-st.markdown('<div class="gc-title">🌐 Global Chain — Macro Intelligence Dashboard</div>',
-            unsafe_allow_html=True)
-st.caption("世界のトップメディアのRSSを集約し、18セクターへ自動分類する自分専用ダッシュボード")
+st.markdown('<div class="gc-sub">A DOCTOR IN JAPAN READS THE WORLD AS ONE SYSTEM</div>', unsafe_allow_html=True)
+st.markdown('<div class="gc-title">🌐 Global Chain — Macro Intelligence Dashboard</div>', unsafe_allow_html=True)
+st.caption("世界のトップメディアからノイズを削ぎ落とし、因果の連鎖を結晶化するマクロ意思決定システム")
 st.divider()
 
-# ---- サイドバー：フィード管理 + セクターフィルタ ----
 with st.sidebar:
-    st.header("⚙️ 設定")
+    st.header("⚙️ システムインフラ")
+    
+    api_key = st.text_input("GEMINI_API_KEY", type="password", 
+                            value=os.environ.get("GEMINI_API_KEY", ""),
+                            help="Google AI Studioで発行した無料枠のキーを入力。空の場合は環境変数から読み込みます。")
 
     if "feeds" not in st.session_state:
         st.session_state.feeds = list(DEFAULT_FEEDS)
 
-    st.subheader("📡 RSSフィード")
+    st.subheader("📡 フィードソース制御")
     feed_labels = [f["name"] for f in st.session_state.feeds]
-    active = st.multiselect("読み込むメディア", feed_labels, default=feed_labels)
+    active = st.multiselect("同期メディア", feed_labels, default=feed_labels)
 
-    with st.expander("➕ フィードを追加"):
-        new_name = st.text_input("メディア名", key="new_name")
-        new_url = st.text_input("RSS URL", key="new_url")
-        if st.button("追加", use_container_width=True):
-            if new_name and new_url:
-                st.session_state.feeds.append({"name": new_name, "url": new_url})
-                st.rerun()
+    with st.expander("➕ フィードソース追加"):
+        new_name = st.text_input("メディア名")
+        new_url = st.text_input("RSS URL")
+        if st.button("追加実行", use_container_width=True) and new_name and new_url:
+            st.session_state.feeds.append({"name": new_name, "url": new_url})
+            st.rerun()
 
-    st.subheader("🏷️ セクターフィルタ")
-    sector_options = ["すべて"] + [f"{jp}（{m['en']}）" for jp, m in SECTORS.items()]
-    selected_sector = st.selectbox("表示するセクター", sector_options)
+    st.subheader("🧹 バフェット・フィルター")
+    use_noise_filter = st.toggle("マクロ・ノイズカット", value=True,
+                                 help="政治・経済・金融・エネルギー・軍事などの主要マクロ変数に関係のない、投資上『ノイズ』となる記事を自動でタイムラインから非表示にします。")
 
-    sort_order = st.selectbox("並び順",
-                              ["新しい順", "セクター別", "全文取得できる順"])
-
-    max_per_feed = st.slider("各メディアの最大記事数", 3, 30, 10)
-    if st.button("🔄 最新を再取得", use_container_width=True):
+    if st.button("🔄 パイプラインを完全再同期", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-    st.divider()
-    st.subheader("🤖 AI要約（Claude API）")
-    use_ai = st.toggle("本物のAI要約をONにする", value=False,
-                       help="グローバルチェーン視点で記事を再構成します。記事を開くたびにAPI料金がかかります。")
-    api_key = ""
-    ai_model = "claude-haiku-4-5-20251001"
-    if use_ai:
-        import os as _os
-        api_key = st.text_input("ANTHROPIC_API_KEY", type="password",
-                                value=_os.environ.get("ANTHROPIC_API_KEY", ""),
-                                help="環境変数 ANTHROPIC_API_KEY があれば自動入力されます。")
-        ai_model = st.selectbox("モデル",
-                                ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8"],
-                                index=0,
-                                help="Haiku=安価・高速 / Sonnet・Opus=高品質・高価")
-        st.caption("⚠️ 記事を開くと1件ずつ課金されます。Haiku推奨。")
-
-# ---- 記事の取得・分類 ----
 active_feeds = [f for f in st.session_state.feeds if f["name"] in active]
 all_articles = []
 errors = []
+seen_titles = set()
 
-progress = st.empty()
 for f in active_feeds:
-    with st.spinner(f"取得中… {f['name']}"):
-        entries, err = fetch_feed(f["url"])
+    entries, err = fetch_feed(f["url"])
     if err:
         errors.append(f"{f['name']}: {err}")
-    for e in entries[:max_per_feed]:
+    for e in entries:
+        title_slug = re.sub(r'[^a-zA-Z0-9一-鿿぀-ゟ゠-ヿ]', '', e["title"].lower())[:30]
+        if title_slug in seen_titles:
+            continue
+        seen_titles.add(title_slug)
+
         text = f"{e['title']}. {e['summary']}"
         scores = classify_sectors(text)
+        
         e["source"] = f["name"]
         e["scores"] = scores
         e["primary"] = scores[0][0] if scores else "未分類"
+        
+        macro_score = sum(sc for sec, sc in scores if SECTORS.get(sec, {}).get("macro_weight", 0) == 1)
+        e["macro_score"] = macro_score
+        
+        if use_noise_filter and macro_score == 0 and len(scores) > 0:
+            continue
+            
         all_articles.append(e)
 
-# まず新しい順に並べる（以降の並び替えは安定ソートなので、各グループ内は新しい順が保たれる）
 all_articles.sort(key=lambda x: x["published"], reverse=True)
+
+if all_articles:
+    meta_input = "\n".join([f"- [{a['primary']}] {a['title']}" for a in all_articles[:15]])
+    with st.spinner("マクロレジームを抽出中..."):
+        macro_intel = generate_macro_summary(meta_input, api_key)
+    
+    st.markdown(f"""
+    <div class="macro-box">
+        <div class="macro-regime">Today's Macro Regime: {macro_intel.get('regime', 'UNKNOWN')}</div>
+        <div class="macro-chain">🌐 {macro_intel.get('chain', '')}</div>
+        <div class="macro-action">⚖️ <b>INVESTOR ACTION:</b> {macro_intel.get('action', 'NO CHANGE')}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+col_ui1, col_ui2, col_ui3 = st.columns([2, 2, 1])
+with col_ui1:
+    sector_options = ["すべてのセクター"] + [f"{jp}（{m['en']}）" for jp, m in SECTORS.items()]
+    selected_sector = st.selectbox("フィルター", sector_options, label_visibility="collapsed")
+with col_ui2:
+    sort_order = st.selectbox("ソート", ["新しい順", "セクター別", "全文取得優先"], label_visibility="collapsed")
+with col_ui3:
+    max_display = st.number_input("表示上限数", min_value=5, max_value=200, value=30, label_visibility="collapsed")
 
 if sort_order == "セクター別":
     _order = {s: i for i, s in enumerate(SECTORS)}
     all_articles.sort(key=lambda x: _order.get(x["primary"], 999))
-elif sort_order == "全文取得できる順":
+elif sort_order == "全文取得優先":
     all_articles.sort(key=lambda x: not is_free_fulltext(x["link"]))
-# 「新しい順」はそのまま
 
-# セクターフィルタ適用
-if selected_sector != "すべて":
+if selected_sector != "すべてのセクター":
     target = selected_sector.split("（")[0]
-    all_articles = [a for a in all_articles
-                    if any(s == target for s, _ in a["scores"])]
+    all_articles = [a for a in all_articles if any(s == target for s, _ in a["scores"])]
 
-# ---- セクター別の記事件数サマリー（上部タブ的な俯瞰） ----
+display_articles = all_articles[:max_display]
+
 counts = defaultdict(int)
-for a in all_articles:
-    if a["scores"]:
-        counts[a["scores"][0][0]] += 1
-
+for a in display_articles:
+    if a["scores"]: counts[a["scores"][0][0]] += 1
 if counts:
-    st.markdown("##### セクター別ヒートマップ（今読み込んでいる記事の主軸分布）")
     cols = st.columns(6)
     items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     for i, (sec, c) in enumerate(items):
         color = SECTORS.get(sec, {}).get("color", "#666")
         with cols[i % 6]:
-            st.markdown(
-                f'<div class="gc-chip" style="background:{color};color:{_chip_text_color(color)};">{sec} · {c}</div>',
-                unsafe_allow_html=True)
+            st.markdown(f'<div class="gc-chip" style="background:{color};color:{_chip_text_color(color)};">{sec} · {c}</div>', unsafe_allow_html=True)
     st.write("")
 
-if errors:
-    # 記事が1件も取れていない場合は、原因を畳まず前面に表示する
-    if not all_articles:
-        st.warning("記事を取得できませんでした。各フィードの状況は以下のとおりです：")
-        for e in errors:
-            st.text("• " + e)
-    else:
-        with st.expander(f"⚠️ 取得に失敗 / 0件だったフィード（{len(errors)}件）"):
-            for e in errors:
-                st.text("• " + e)
-
-st.caption(f"📰 {len(all_articles)} 件の記事")
-
-# 全文取得済みリンクを保持（都度取得・セッション内で記憶）
 if "fulltext" not in st.session_state:
     st.session_state.fulltext = set()
 
-# ---- 記事カード一覧 ----
 _current_sector = None
-for idx, a in enumerate(all_articles):
-    # セクター別表示のときは、グループの切れ目に見出しを出す
+for idx, a in enumerate(display_articles):
     if sort_order == "セクター別" and a["primary"] != _current_sector:
         _current_sector = a["primary"]
         _c = SECTORS.get(_current_sector, {}).get("color", "#888")
-        st.markdown(
-            f'<h3 style="margin:18px 0 6px 0;border-bottom:2px solid {_c};'
-            f'display:inline-block;padding-bottom:2px;">{_current_sector}</h3>',
-            unsafe_allow_html=True)
+        st.markdown(f'<h3 style="margin:20px 0 8px 0; border-bottom:2px solid {_c}; display:inline-block;">{_current_sector}</h3>', unsafe_allow_html=True)
 
     link = a["link"]
-    teaser = a["summary"]
-
-    # この記事を全文取得済みか？取得済みなら本文を使い、分類も本文で再計算する
     body_text, body_reason = "", None
     if link in st.session_state.fulltext:
         body_text, body_reason = fetch_article_body(link)
 
-    if body_text:
-        analysis_text = f"{a['title']}. {body_text}"
-        read_len = len(body_text)
-        read_label = "📄 全文取得"
-    else:
-        analysis_text = f"{a['title']}. {teaser}"
-        read_len = len(teaser)
-        read_label = "📄 RSS概要のみ"
-
+    analysis_text = f"{a['title']}. {body_text if body_text else a['summary']}"
+    read_label = "📄 全文ソース" if body_text else "📄 RSS概要"
+    
     scores = classify_sectors(analysis_text)
-    primary = scores[0][0] if scores else "未分類"
-    primary_color = SECTORS.get(primary, {}).get("color", "#444")
-
-    # タイトル自体を展開バーにして、カードと要約を一体化する
+    
     with st.expander(a["title"]):
-
-        # メタ情報（出典・日時・読込文字数）
         meta_date = a['published'].strftime('%m/%d %H:%M') if a['published'] != dt.datetime.min else ''
-        st.markdown(
-            f'<div class="gc-source">{html.escape(a["source"])} · {meta_date} · {read_label}: {read_len:,}字</div>',
-            unsafe_allow_html=True)
+        st.markdown(f'<div class="gc-source">{html.escape(a["source"])} · {meta_date} · {read_label} ({len(analysis_text):,}字)</div>', unsafe_allow_html=True)
 
-        # セクターチップ
-        chips = ""
-        for sec, sc in scores[:4]:
-            color = SECTORS[sec]["color"]
-            chips += f'<span class="gc-chip" style="background:{color};color:{_chip_text_color(color)};">{sec} {sc}</span>'
-        if chips:
-            st.markdown(chips, unsafe_allow_html=True)
+        chips = "".join([f'<span class="gc-chip" style="background:{SECTORS[sec]["color"]};color:{_chip_text_color(SECTORS[sec]["color"])};">{sec}</span>' for sec, _ in scores[:3]])
+        if chips: st.markdown(chips, unsafe_allow_html=True)
 
-        if True:
+        if not body_text and is_free_fulltext(link):
+            if st.button("📥 本文をフルスクレイピングして再分析", key=f"ft_{idx}"):
+                st.session_state.fulltext.add(link)
+                st.rerun()
 
-            # --- 全文取得のコントロール ---
-            if body_text:
-                st.success(f"本文を取得済み（{read_len:,}字）。要約・分類はこの本文に基づきます。")
-            elif body_reason:
-                st.warning(f"全文取得を試みましたが失敗しました: {body_reason}")
-            if not body_text and is_free_fulltext(link):
-                if st.button("📄 全文を取得して再分析", key=f"ft_{idx}"):
-                    st.session_state.fulltext.add(link)
-                    st.rerun()
-            elif not body_text and link and not is_free_fulltext(link):
-                st.caption("※ このメディアは有料の壁、またはGoogle News経由のリンクのため全文取得の対象外です（RSS概要のみ）。")
+        if api_key:
+            with st.spinner("Geminiがサプライチェーンの連鎖を解析中..."):
+                res = gemini_analysis(analysis_text, a["title"], api_key)
+            
+            if "error" in res:
+                st.error(f"Gemini解析エラー: {res['error']}")
+            else:
+                st.markdown(f"**🎙️ Today's Theme:** {res.get('theme', '')}")
+                st.markdown("**3 Key Takeaways:**")
+                for t in res.get("takeaways", []):
+                    st.markdown(f"- {t}")
+                
+                st.markdown(f"""
+                <div class="gc-essence">
+                    <b>🔗 GLOBAL CHAIN FLOW (因果の連鎖)</b><br>
+                    <span style="font-family:'IBM Plex Mono', monospace; font-size:0.9rem; color:#8a3a2e;">{res.get('chain_flow', '')}</span>
+                    <br><br>
+                    <b>THE ESSENCE (マクロの本質)</b><br>
+                    {res.get('essence', '')}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("サイドバーで GEMINI_API_KEY を設定すると、ここにGeminiによる自動連鎖解析が完全無料で表示されます。")
+            st.markdown(f"> {a['summary']}")
 
-            # === AI要約モード（Claude API） ===
-            if use_ai:
-                if not api_key:
-                    st.info("サイドバーで ANTHROPIC_API_KEY を入力するとAI要約が有効になります。")
-                else:
-                    with st.spinner("Global Chain Radio 形式で分析中…"):
-                        result = claude_analysis(analysis_text, a["title"], api_key, ai_model)
-                    if "error" in result:
-                        st.error(f"AI要約エラー: {result['error']}")
-                    else:
-                        st.markdown(f"**🎙️ Today's Theme**　{result.get('theme','')}")
-                        st.markdown("**3 Key Takeaways**")
-                        for t in result.get("takeaways", []):
-                            st.markdown(f"- {t}")
-                        secs = "・".join(result.get("sectors", []))
-                        st.markdown(
-                            f'<div class="gc-essence"><b>THE ESSENCE</b><br>'
-                            f'{result.get("essence","")}'
-                            f'{("<br><br>波及セクター: " + secs) if secs else ""}</div>',
-                            unsafe_allow_html=True)
-                        if link:
-                            st.markdown(f"[原文を読む ↗]({link})")
+        if link: st.markdown(f"[Go to Original Article ↗]({link})")
 
-            # === 抽出要約モード（無料・APIなし） ===
-            if not use_ai:
-                summary, status = heuristic_summary(analysis_text)
-                if status == "thin":
-                    st.markdown("**📝 要約**")
-                    st.caption("本文がほとんど取得できていないため要約できません（実質、見出しのみ）。"
-                               "上の『全文を取得』が使えるメディアなら取得すると要約できます。")
-                    if summary:
-                        st.markdown(f"> {summary}")
-                else:
-                    st.markdown("**📝 要約（読み込めた本文からの抽出・文章形式）**")
-                    st.markdown(summary)
-                    st.caption("※ これは原文の重要文をつないだ抽出要約です。"
-                               "グローバルチェーン視点での再構成はサイドバーのAI要約をご利用ください。")
-
-                st.markdown(
-                    f'<div class="gc-essence"><b>THE ESSENCE — 波及セクター</b><br>'
-                    f'{hypothesis_hint(scores)}</div>',
-                    unsafe_allow_html=True)
-
-                # Gemini / ChatGPT 等に貼り付けて、無料で「翻訳＋GCR形式要約」を作るためのプロンプト
-                st.markdown("**🤖 無料で翻訳＋要約（Gemini / ChatGPT 用）**")
-                prompt_text = body_text if body_text else teaser
-                full_prompt = build_llm_prompt(a["title"], prompt_text, link)
-                copy_button(full_prompt, key=str(idx))
-                st.caption("コピー → Gemini や ChatGPT に貼り付けるだけ。"
-                           "全文取得済みの記事ほど、訳・要約の質が上がります。")
-                if st.checkbox("プロンプトの中身を見る", key=f"pp_{idx}"):
-                    st.code(full_prompt, language="text")
-
-                if link:
-                    st.markdown(f"[原文を読む ↗]({link})")
-
-if not all_articles and not errors:
-    st.info("サイドバーでメディアを選び、「最新を再取得」を押してください。")
+if errors:
+    st.write("---")
+    with st.expander(f"📡 ネットワーク通信ステータス: {len(errors)}件のフィードで前回のキャッシュをサイレント適用中"):
+        for err in errors:
+            st.caption(f"• {err}")
+"""
