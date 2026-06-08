@@ -343,6 +343,56 @@ def hypothesis_hint(scores):
     return f"主軸は【{top}】。"
 
 
+# =============================================================================
+# 3a. 引き算エンジン（フェーズ1）— 「今日効く度」スコアとリスクトーン
+#     広めのマクロ観測モード：18セクターを満遍なく拾いつつ、マクロ感応度で重み付け。
+# =============================================================================
+
+# マクロ（特に市場全体）への効きやすさ。アートやファッションは0でも、分類自体は残る。
+MACRO_WEIGHT = {
+    "金融": 3, "経済": 3, "エネルギー": 3, "軍事": 2, "外交": 2, "テック": 2,
+    "公衆衛生": 1, "食糧": 1, "農業": 1, "政治": 1, "宇宙": 1, "保険": 1,
+    "医療": 1, "不動産": 1, "地域": 1, "アート": 0, "ファッション": 0, "カルチャー": 0,
+}
+# 市場を動かす「シグナル語」。リスクオフ＝不安、リスクオン＝楽観の方向。
+RISK_OFF_WORDS = ["war", "conflict", "sanction", "crisis", "crash", "recession",
+                  "default", "attack", "invasion", "inflation", "rate hike",
+                  "tariff", "shortage", "strike", "tension", "escalat"]
+RISK_ON_WORDS = ["rate cut", "ceasefire", "truce", "deal", "stimulus", "rally",
+                 "recovery", "easing", "breakthrough", "agreement"]
+NOTABLE_THRESHOLD = 6  # これ以上を「今日効く記事」とみなす
+
+
+def impact_score(title: str, summary: str, scores):
+    """記事の『今日効く度』を返す。 (score, risk_off回数, risk_on回数)"""
+    text = f"{title} {summary}".lower()
+    s = 0.0
+    for sec, _ in scores[:3]:
+        s += MACRO_WEIGHT.get(sec, 0)
+    off = sum(text.count(k) for k in RISK_OFF_WORDS)
+    on = sum(text.count(k) for k in RISK_ON_WORDS)
+    s += (off + on) * 1.5
+    if len(scores) >= 3:
+        s += 2          # 連鎖が広い（複数セクターにまたがる）ほど重要
+    elif len(scores) >= 2:
+        s += 1
+    return s, off, on
+
+
+def daily_brief(articles):
+    """画面最上部の一行サマリー用に、注目件数とリスクトーンを集計して返す。"""
+    notable = [a for a in articles if a.get("impact", 0) >= NOTABLE_THRESHOLD]
+    off = sum(a.get("risk_off", 0) for a in notable)
+    on = sum(a.get("risk_on", 0) for a in notable)
+    if on > off * 1.3:
+        tone, color = "リスクオン寄り", "#27ae60"
+    elif off > on * 1.3:
+        tone, color = "リスクオフ寄り", "#c0392b"
+    else:
+        tone, color = "中立", "#8a8f78"
+    return notable, tone, color
+
+
 def build_llm_prompt(title: str, text: str, link: str) -> str:
     """Gemini / ChatGPT / チャット版Claude に貼り付けるためのプロンプトを組み立てる。
     日本語訳＋Global Chain Radio形式の要約を、追加課金なしで作ってもらうためのもの。"""
@@ -424,15 +474,18 @@ def gemini_analysis(text: str, title: str, api_key: str, model: str):
         "item by asking: where does this sit in the global chain, and what historical pattern "
         "does it echo?"
     )
-    user = f"""次の英語ニュースを、Global Chain Radio の固定フォーマットで日本語にまとめてください。
-単なる要約ではなく、『この出来事がサプライチェーン・歴史・システムのどこに位置するか』を構造的に示すこと。
+    user = f"""次の英語ニュースを、Global Chain Radio の視点で分析してください。
+最重要は「連鎖（chain）」です。出来事が市場・セクターへどう波及するかを、因果のドミノとして具体的に示すこと。
+例：「軍事衝突 → ホルムズ海峡の海運リスク → 原油↑ → インフレ再燃 → 金利↑ → グロース株に逆風／防衛・エネルギー関連に追い風 → リスクオフ」。
+推測が混じる場合は断定しすぎず、ただし因果の方向（↑↓）は明示すること。
 
 # 出力は JSON のみ（前置き・コードブロック・説明文は禁止）
 {{
   "theme": "今日のテーマ（日常ニュースとマクロ視点を橋渡しする一文・40字以内）",
-  "takeaways": ["要点1（サプライチェーン/歴史/システムの観点・60字以内）", "要点2", "要点3"],
-  "essence": "なぜ今このニュースがグローバルチェーン上で重要か。投資・臨床・政策の意思決定層に響く本質（120字以内）",
-  "sectors": ["波及する分野を2〜4個（例: 軍事, エネルギー, 外交）"]
+  "chain": ["出来事", "一次効果", "二次効果", "市場/セクターへの帰結", "（必要なら）最終的な地合い"],
+  "risk_tone": "リスクオン / リスクオフ / 中立 のいずれか",
+  "sectors": ["影響が及ぶ分野を2〜4個（例: 軍事, エネルギー, 金融）"],
+  "index_implication": "S&P500長期インデックス投資家への含意。多くの場合『長期方針の変更は不要』。変更不要ならそう明示し、例外的に注意すべき時だけ理由を述べる（80字以内）"
 }}
 
 # 記事
@@ -507,6 +560,23 @@ h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #1c1813 !important;
 /* ---- 区切り線を細いインク色に ---- */
 hr { border-color: #d8cfb8 !important; }
 
+/* ---- フェーズ1: 一行サマリー（5秒で結論） ---- */
+.gc-brief { background: #fbf8f0; border: 1px solid #e0d7c2; border-left: 5px solid #8a8f78;
+            border-radius: 5px; padding: 13px 18px; margin: 4px 0 14px 0;
+            font-size: 1.02rem; color: #2a261f; box-shadow: 0 1px 3px rgba(60,50,30,.08); }
+.gc-brief-tone { font-family: 'IBM Plex Mono', monospace; font-weight: 600;
+                 font-size: .82rem; letter-spacing: .5px; }
+.gc-brief-sub { font-size: .8rem; color: #6b6354; margin-top: 5px;
+                font-family: 'Spectral', serif; }
+
+/* ---- フェーズ2: 連鎖（CHAIN）表示 ---- */
+.gc-chain { background: #f7f1e4; border: 1px solid #d8cdb4; border-left: 4px solid #8a3a2e;
+            border-radius: 5px; padding: 13px 17px; margin: 8px 0; }
+.gc-chain b { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .74rem;
+              letter-spacing: 1px; }
+.gc-chain-body { margin-top: 8px; font-family: 'Spectral', serif; font-size: 1.02rem;
+                 line-height: 1.7; color: #2a261f; }
+
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #fbf8f0; border: 1px solid #e0d7c2 !important;
                              border-left: 3px solid #8a3a2e !important; border-radius: 4px;
@@ -560,7 +630,9 @@ with st.sidebar:
     selected_sector = st.selectbox("表示するセクター", sector_options)
 
     sort_order = st.selectbox("並び順",
-                              ["新しい順", "セクター別", "全文取得できる順"])
+                              ["今日効く度順", "新しい順", "セクター別", "全文取得できる順"])
+    only_notable = st.toggle("ノイズを削る（今日効く記事だけ）", value=False,
+                             help="長期投資・番組素材に効く記事だけに絞ります。静かな日は『方針変更不要』と表示します。")
 
     max_per_feed = st.slider("各メディアの最大記事数", 3, 30, 10)
     if st.button("🔄 最新を再取得", use_container_width=True):
@@ -602,6 +674,8 @@ for f in active_feeds:
         e["source"] = f["name"]
         e["scores"] = scores
         e["primary"] = scores[0][0] if scores else "未分類"
+        imp, off, on = impact_score(e["title"], e["summary"], scores)
+        e["impact"], e["risk_off"], e["risk_on"] = imp, off, on
         all_articles.append(e)
 
 # --- フェーズ0(a): 重複記事の除去 ---------------------------------------------
@@ -624,6 +698,9 @@ for a in all_articles:
 _dupes_removed = len(all_articles) - len(_deduped)
 all_articles = _deduped
 
+# 一行サマリーは「その日全体」で集計（フィルタで絞る前のスナップショット）
+_notable_all, _tone, _tone_color = daily_brief(all_articles)
+
 # まず新しい順に並べる（以降の並び替えは安定ソートなので、各グループ内は新しい順が保たれる）
 all_articles.sort(key=lambda x: x["published"], reverse=True)
 
@@ -632,13 +709,38 @@ if sort_order == "セクター別":
     all_articles.sort(key=lambda x: _order.get(x["primary"], 999))
 elif sort_order == "全文取得できる順":
     all_articles.sort(key=lambda x: not is_free_fulltext(x["link"]))
+elif sort_order == "今日効く度順":
+    all_articles.sort(key=lambda x: x.get("impact", 0), reverse=True)
 # 「新しい順」はそのまま
+
+# ノイズ削減フィルタ（今日効く記事だけに絞る）
+if only_notable:
+    all_articles = [a for a in all_articles if a.get("impact", 0) >= NOTABLE_THRESHOLD]
 
 # セクターフィルタ適用
 if selected_sector != "すべて":
     target = selected_sector.split("（")[0]
     all_articles = [a for a in all_articles
                     if any(s == target for s, _ in a["scores"])]
+
+# ---- フェーズ1: 5秒で結論が出る一行サマリー（最上部） ----
+if all_articles:
+    n_notable = len(_notable_all)
+    if n_notable == 0:
+        st.markdown(
+            '<div class="gc-brief" style="border-left-color:#8a8f78;">'
+            '<span class="gc-brief-tone" style="color:#8a8f78;">● 静かな一日</span>'
+            '　今日は長期の方針を変える必要はなさそうです。'
+            '市場全体を動かすニュースは検出されていません。</div>',
+            unsafe_allow_html=True)
+    else:
+        top_titles = " ／ ".join(html.escape(a["title"][:46]) for a in _notable_all[:3])
+        st.markdown(
+            f'<div class="gc-brief" style="border-left-color:{_tone_color};">'
+            f'<span class="gc-brief-tone" style="color:{_tone_color};">● 全体トーン: {_tone}</span>'
+            f'　今日の注目 <b>{n_notable}</b> 件'
+            f'<div class="gc-brief-sub">主役の連鎖候補: {top_titles}</div></div>',
+            unsafe_allow_html=True)
 
 # ---- セクター別の記事件数サマリー（上部タブ的な俯瞰） ----
 counts = defaultdict(int)
@@ -766,15 +868,34 @@ for idx, a in enumerate(all_articles):
                         st.error(f"AI要約エラー: {result['error']}")
                     else:
                         st.markdown(f"**🎙️ Today's Theme**　{result.get('theme','')}")
-                        st.markdown("**3 Key Takeaways**")
-                        for t in result.get("takeaways", []):
-                            st.markdown(f"- {t}")
+
+                        # 🔗 連鎖（CHAIN）— このアプリの主役
+                        chain = result.get("chain", [])
+                        if chain:
+                            tone = result.get("risk_tone", "")
+                            tone_color = ("#27ae60" if "オン" in tone
+                                          else "#c0392b" if "オフ" in tone else "#8a8f78")
+                            steps = '<span style="color:#8a3a2e;font-weight:700;"> → </span>'.join(
+                                html.escape(str(s)) for s in chain)
+                            tone_badge = (f'<span style="background:{tone_color};color:#fff;'
+                                          f'font-size:.7rem;padding:2px 8px;border-radius:3px;'
+                                          f'font-family:IBM Plex Mono,monospace;">{html.escape(tone)}</span>'
+                                          if tone else "")
+                            st.markdown(
+                                f'<div class="gc-chain"><b>🔗 連鎖（CHAIN）</b>　{tone_badge}'
+                                f'<div class="gc-chain-body">{steps}</div></div>',
+                                unsafe_allow_html=True)
+
                         secs = "・".join(result.get("sectors", []))
-                        st.markdown(
-                            f'<div class="gc-essence"><b>THE ESSENCE</b><br>'
-                            f'{result.get("essence","")}'
-                            f'{("<br><br>波及セクター: " + secs) if secs else ""}</div>',
-                            unsafe_allow_html=True)
+                        if secs:
+                            st.markdown(f"**波及セクター**：{secs}")
+
+                        impl = result.get("index_implication", "")
+                        if impl:
+                            st.markdown(
+                                f'<div class="gc-essence"><b>📊 インデックス投資家への含意</b><br>'
+                                f'{html.escape(impl)}</div>',
+                                unsafe_allow_html=True)
                         if link:
                             st.markdown(f"[原文を読む ↗]({link})")
 
