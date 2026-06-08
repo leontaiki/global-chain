@@ -559,6 +559,16 @@ h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #121212 !important;
 /* ---- 区切り線 ---- */
 hr { border-color: #d9d9d6 !important; }
 
+/* ---- セクター別 横棒ヒートマップ ---- */
+.gc-bars { margin: 4px 0 2px 0; }
+.gc-bar-row { display: flex; align-items: center; gap: 10px; margin: 3px 0; }
+.gc-bar-label { width: 76px; flex-shrink: 0; font-family: 'Spectral', serif;
+                font-size: .9rem; color: #121212; text-align: right; }
+.gc-bar-track { flex: 1; background: #f0f0ee; border-radius: 2px; height: 16px; }
+.gc-bar-fill { height: 16px; border-radius: 2px; min-width: 3px; transition: width .3s; }
+.gc-bar-val { width: 28px; flex-shrink: 0; font-family: 'IBM Plex Mono', monospace;
+              font-size: .78rem; color: #595959; }
+
 /* ---- フェーズ1: 一行サマリー（5秒で結論） ---- */
 .gc-brief { background: #ffffff; border: 1px solid #e2e2df; border-left: 5px solid #E3120B;
             border-radius: 3px; padding: 13px 18px; margin: 4px 0 14px 0;
@@ -575,6 +585,14 @@ hr { border-color: #d9d9d6 !important; }
               letter-spacing: 1px; }
 .gc-chain-body { margin-top: 8px; font-family: 'Spectral', serif; font-size: 1.02rem;
                  line-height: 1.7; color: #121212; }
+
+/* ---- 常時表示キッカー（見出し上の小見出し） ---- */
+.gc-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+           margin: 6px 0 -4px 2px; }
+.gc-meta-sec { font-family: 'IBM Plex Mono', monospace; font-size: .62rem; font-weight: 600;
+               padding: 1px 7px; border-radius: 2px; letter-spacing: .3px; }
+.gc-meta-txt { font-family: 'IBM Plex Mono', monospace; font-size: .66rem; color: #8a8a8a;
+               letter-spacing: .5px; text-transform: uppercase; }
 
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
@@ -749,14 +767,21 @@ for a in all_articles:
 
 if counts:
     st.markdown("##### セクター別ヒートマップ（今読み込んでいる記事の主軸分布）")
-    cols = st.columns(6)
     items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-    for i, (sec, c) in enumerate(items):
+    _max = max(c for _, c in items) or 1
+    rows = ""
+    for sec, c in items:
         color = SECTORS.get(sec, {}).get("color", "#666")
-        with cols[i % 6]:
-            st.markdown(
-                f'<div class="gc-chip" style="background:{color};color:{_chip_text_color(color)};">{sec} · {c}</div>',
-                unsafe_allow_html=True)
+        pct = int(c / _max * 100)
+        rows += (
+            '<div class="gc-bar-row">'
+            f'<div class="gc-bar-label">{sec}</div>'
+            f'<div class="gc-bar-track"><div class="gc-bar-fill" '
+            f'style="width:{pct}%;background:{color};"></div></div>'
+            f'<div class="gc-bar-val">{c}</div>'
+            '</div>'
+        )
+    st.markdown(f'<div class="gc-bars">{rows}</div>', unsafe_allow_html=True)
     st.write("")
 
 if errors:
@@ -825,16 +850,24 @@ for idx, a in enumerate(all_articles):
     primary = scores[0][0] if scores else "未分類"
     primary_color = SECTORS.get(primary, {}).get("color", "#444")
 
+    # ---- 常時表示の「キッカー」（見出し上の小見出し）: セクター・出典・効く度・読込状態 ----
+    meta_date = a['published'].strftime('%m/%d %H:%M') if a['published'] != dt.datetime.min else ''
+    impact_val = int(round(a.get("impact", 0)))
+    sec_chips = "".join(
+        f'<span class="gc-meta-sec" style="background:{SECTORS[s]["color"]};'
+        f'color:{_chip_text_color(SECTORS[s]["color"])};">{s}</span>'
+        for s, _ in scores[:2]
+    )
+    st.markdown(
+        f'<div class="gc-meta">{sec_chips}'
+        f'<span class="gc-meta-txt">{html.escape(a["source"])} · {meta_date}'
+        f' · ⚡{impact_val} · {read_label}</span></div>',
+        unsafe_allow_html=True)
+
     # タイトル自体を展開バーにして、カードと要約を一体化する
     with st.expander(a["title"]):
 
-        # メタ情報（出典・日時・読込文字数）
-        meta_date = a['published'].strftime('%m/%d %H:%M') if a['published'] != dt.datetime.min else ''
-        st.markdown(
-            f'<div class="gc-source">{html.escape(a["source"])} · {meta_date} · {read_label}: {read_len:,}字</div>',
-            unsafe_allow_html=True)
-
-        # セクターチップ
+        # セクターチップ（全スコア）
         chips = ""
         for sec, sc in scores[:4]:
             color = SECTORS[sec]["color"]
