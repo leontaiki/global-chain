@@ -132,8 +132,8 @@ def fetch_article_body(url: str):
         h = raw.decode("utf-8", errors="ignore")
         
         meta = ""
-        # クォートの衝突を避けるため、文字コード ["'] (単・複引用符) を使用
-        m = re.search(r'<meta[^>]+(property|name)=["'](og:description|description)["'][^>]*content=["']([^"']+)', h, re.I)
+        # 書き出しのデコードバグを完全に回避するため、外側をダブルクォートのraw文字列にし、バックスラッシュを二重エスケープ
+        m = re.search(r"<meta[^>]+(property|name)=[\\x22\\x27](og:description|description)[\\x22\\x27][^>]*content=[\\x22\\x27]([^\\x22\\x27]+)", h, re.I)
         if m: meta = html.unescape(m.group(3)).strip()
 
         paras = re.findall(r"<p[^>]*>(.*?)</p>", h, re.S | re.I)
