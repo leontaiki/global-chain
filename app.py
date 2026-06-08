@@ -155,18 +155,35 @@ def _extract_entry_image(e) -> str:
             for it in items:
                 url = it.get("url")
                 if url:
-                    return url
+                    return _upgrade_image_res(url)
     # 2) enclosure（画像タイプのものだけ）
     for enc in e.get("links", []):
         if enc.get("rel") == "enclosure" and "image" in (enc.get("type") or ""):
             if enc.get("href"):
-                return enc["href"]
+                return _upgrade_image_res(enc["href"])
     # 3) 本文HTML内の最初の <img>
     body = e.get("summary", e.get("description", "")) or ""
     m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', body, re.I)
     if m:
-        return m.group(1)
+        return _upgrade_image_res(m.group(1))
     return ""
+
+
+def _upgrade_image_res(url: str) -> str:
+    """低解像度サムネイルURLを、可能なら高解像度版に書き換える。
+    荒い画像を出さないため、主要メディアのサイズ指定を大きくする。"""
+    if not url:
+        return ""
+    # The Guardian: .../<width>.jpg や width=140 を大きく
+    url = re.sub(r"/(\d{2,4})\.(jpg|jpeg|png|webp)", r"/1000.\2", url)
+    url = re.sub(r"([?&]width=)\d+", r"\g<1>1000", url)
+    url = re.sub(r"([?&]quality=)\d+", r"\g<1>85", url)
+    # BBC: /news/240/.../ のようなサイズ指定を /news/1024/ に
+    url = re.sub(r"/(cpsprodpb|news)/(\d{2,4})/", r"/\1/1024/", url)
+    # NYT: ...-thumbStandard.jpg / -articleInline.jpg を -superJumbo に
+    url = re.sub(r"-(thumb\w*|articleInline|moth|master\d*)\.(jpg|jpeg|png)",
+                 r"-superJumbo.\2", url)
+    return url
 
 
 @st.cache_data(ttl=900, show_spinner=False)  # 15分キャッシュ
@@ -699,6 +716,35 @@ hr { border-color: #d9d9d6 !important; }
             border: 1px solid #e2e2df; }
 @media (max-width: 640px) { .gc-thumb { height: 150px; } }
 
+/* ---- 今日の主役（ヒーローカード） ---- */
+.gc-hero-label { font-family: 'IBM Plex Mono', monospace; font-size: .72rem; font-weight: 600;
+                 letter-spacing: 2px; text-transform: uppercase; color: #E3120B;
+                 border-bottom: 2px solid #E3120B; display: inline-block;
+                 padding-bottom: 3px; margin: 6px 0 12px 0; }
+.gc-hero-big { display: block; text-decoration: none; border: 1px solid #e2e2df;
+               border-radius: 4px; overflow: hidden; margin-bottom: 12px;
+               transition: box-shadow .15s; }
+.gc-hero-big:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+.gc-hero-img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.gc-hero-body { padding: 14px 18px; }
+.gc-hero-kicker { margin-bottom: 6px; }
+.gc-hero-chip { font-family: 'IBM Plex Mono', monospace; font-size: .64rem; font-weight: 600;
+                padding: 2px 8px; border-radius: 2px; margin-right: 8px; }
+.gc-hero-src { font-family: 'IBM Plex Mono', monospace; font-size: .68rem; color: #8a8a8a;
+               letter-spacing: .5px; text-transform: uppercase; }
+.gc-hero-title { font-family: 'Spectral', serif; font-size: 1.5rem; font-weight: 700;
+                 color: #121212; line-height: 1.25; }
+.gc-hero-sm { display: block; text-decoration: none; border: 1px solid #e2e2df;
+              border-radius: 4px; overflow: hidden; height: 100%;
+              transition: box-shadow .15s; }
+.gc-hero-sm:hover { box-shadow: 0 4px 16px rgba(0,0,0,.10); }
+.gc-hero-img-sm { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.gc-hero-sm .gc-hero-kicker { padding: 10px 12px 0 12px; margin-bottom: 4px; }
+.gc-hero-title-sm { font-family: 'Spectral', serif; font-size: 1.05rem; font-weight: 600;
+                    color: #121212; line-height: 1.3; padding: 0 12px 12px 12px; }
+.gc-hero-noimg { background: linear-gradient(135deg, #f0f0ee, #e2e2df); }
+@media (max-width: 640px) { .gc-hero-title { font-size: 1.2rem; } }
+
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
                              border-left: 3px solid #E3120B !important; border-radius: 3px;
@@ -867,6 +913,44 @@ if all_articles:
             f'　今日の注目 <b>{n_notable}</b> 件'
             f'<div class="gc-brief-sub">主役の連鎖候補: {top_titles}</div></div>',
             unsafe_allow_html=True)
+
+# ---- 今日の主役：効く度トップ3を大型ビジュアルカードで ----
+def _hero_kicker(a):
+    sec = a["scores"][0][0] if a["scores"] else ""
+    color = SECTORS.get(sec, {}).get("color", "#888")
+    chip = (f'<span class="gc-hero-chip" style="background:{color};'
+            f'color:{_chip_text_color(color)};">{sec}</span>' if sec else "")
+    return f'{chip}<span class="gc-hero-src">{html.escape(a["source"])}　⚡{int(round(a.get("impact",0)))}</span>'
+
+def _hero_img(a, cls):
+    if not a.get("image"):
+        return f'<div class="{cls} gc-hero-noimg"></div>'
+    return (f'<img class="{cls}" src="{html.escape(a["image"])}" loading="lazy" '
+            f'onerror="this.outerHTML=\'<div class=&quot;{cls} gc-hero-noimg&quot;></div>\'">')
+
+heroes = [a for a in sorted(all_articles, key=lambda x: x.get("impact", 0), reverse=True)
+          if a.get("impact", 0) >= profile["threshold"]][:3]
+if heroes:
+    st.markdown('<div class="gc-hero-label">今日の主役</div>', unsafe_allow_html=True)
+    h0 = heroes[0]
+    st.markdown(
+        f'<a class="gc-hero-big" href="{html.escape(h0["link"])}" target="_blank" rel="noopener">'
+        f'{_hero_img(h0, "gc-hero-img")}'
+        f'<div class="gc-hero-body"><div class="gc-hero-kicker">{_hero_kicker(h0)}</div>'
+        f'<div class="gc-hero-title">{html.escape(h0["title"])}</div></div></a>',
+        unsafe_allow_html=True)
+    rest = heroes[1:]
+    if rest:
+        cols = st.columns(len(rest))
+        for col, h in zip(cols, rest):
+            with col:
+                st.markdown(
+                    f'<a class="gc-hero-sm" href="{html.escape(h["link"])}" target="_blank" rel="noopener">'
+                    f'{_hero_img(h, "gc-hero-img-sm")}'
+                    f'<div class="gc-hero-kicker">{_hero_kicker(h)}</div>'
+                    f'<div class="gc-hero-title-sm">{html.escape(h["title"])}</div></a>',
+                    unsafe_allow_html=True)
+    st.write("")
 
 # ---- セクター別の記事件数サマリー（上部タブ的な俯瞰） ----
 counts = defaultdict(int)
