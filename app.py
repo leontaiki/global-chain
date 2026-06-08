@@ -614,7 +614,11 @@ def gemini_analysis(text: str, title: str, api_key: str, model: str):
         m = re.search(r"\{.*\}", raw, re.S)
         return json.loads(m.group(0) if m else raw)
     except Exception as ex:  # noqa: BLE001
-        return {"error": str(ex)}
+        msg = str(ex)
+        if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+            return {"error": "無料枠の上限に達しました。少し時間をおくか、"
+                             "サイドバーのモデルを Flash-Lite（無料枠が広い）に切り替えてください。"}
+        return {"error": msg}
 
 
 # =============================================================================
@@ -809,20 +813,20 @@ with st.sidebar:
     st.divider()
     st.subheader("🤖 AI要約（Gemini API）")
     use_ai = st.toggle("本物のAI要約をONにする", value=False,
-                       help="グローバルチェーン視点で記事を再構成します。Gemini無料枠（1日1,500回）の範囲なら無料です。")
+                       help="グローバルチェーン視点で記事を再構成します。Gemini無料枠の範囲なら課金なしです。")
     api_key = ""
-    ai_model = "gemini-2.5-flash"
+    ai_model = "gemini-2.5-flash-lite"
     if use_ai:
         import os as _os
         api_key = st.text_input("GEMINI_API_KEY", type="password",
                                 value=_os.environ.get("GEMINI_API_KEY", ""),
                                 help="Google AI Studio (aistudio.google.com) で無料発行。環境変数 GEMINI_API_KEY があれば自動入力されます。")
         ai_model = st.selectbox("モデル",
-                                ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+                                ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
                                 index=0,
-                                help="無料枠はFlash系のみ。Flash=高品質 / Flash-Lite=高速・軽量")
-        st.caption("💡 無料枠（1日1,500回・毎分15回）の範囲なら課金なし。"
-                   "ただし無料枠は入力がGoogleのモデル改善に使われる場合があります。")
+                                help="無料枠はFlash系のみ。Flash-Lite=無料枠が広い(推奨) / Flash=高品質だが無料枠が少ない")
+        st.caption("💡 無料枠の目安: Flash-Lite ≈ 1日1,000回 / Flash ≈ 1日20回。"
+                   "上限超過時は時間をおくかFlash-Liteへ。無料枠は入力がGoogleのモデル改善に使われる場合あり。")
 
 # ---- 記事の取得・分類 ----
 active_feeds = [f for f in st.session_state.feeds if f["name"] in active]
