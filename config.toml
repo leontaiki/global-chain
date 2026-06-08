@@ -1,0 +1,8 @@
+[theme]
+# 端末のダーク/ライト設定に関わらず、常にこの紙色テーマで表示する
+base = "light"
+primaryColor = "#8a3a2e"
+backgroundColor = "#f4efe3"
+secondaryBackgroundColor = "#ebe4d3"
+textColor = "#23201a"
+font = "serif"
