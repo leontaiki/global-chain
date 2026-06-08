@@ -518,34 +518,30 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Spectral:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-/* ---- 全体：紙のようなクリーム背景 + インク色の文字 ---- */
-.stApp { background: #f4efe3; color: #23201a; }
-[data-testid="stMain"] { background: #f4efe3; }
+/* ---- 全体：白基調 + インク文字（The Economist系） ---- */
+.stApp { background: #ffffff; color: #121212; }
+[data-testid="stMain"] { background: #ffffff; }
+[data-testid="stSidebar"] { background: #f4f4f2; border-right: 1px solid #d9d9d6; }
+[data-testid="stSidebar"] * { color: #1a1a1a; }
+.stApp p, .stApp li, .stApp span, .stApp label, .stMarkdown { color: #2b2b2b; }
 
-/* 上部ヘッダー/ツールバーは残しつつ、黒い背景だけ紙色にする（機能は維持） */
-[data-testid="stHeader"] { background: #f4efe3 !important; }
-[data-testid="stToolbar"] { background: transparent !important; }
-[data-testid="stSidebar"] { background: #ebe4d3; border-right: 1px solid #d8cfb8; }
-[data-testid="stSidebar"] * { color: #2c281f; }
-.stApp p, .stApp li, .stApp span, .stApp label, .stMarkdown { color: #3a342a; }
-
-h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #1c1813 !important;
+h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #121212 !important;
                  letter-spacing: .2px; }
 
-/* ---- ヘッダー ---- */
-.gc-title { font-size: 2.3rem; font-weight: 800; margin-bottom: 2px; color: #1c1813; }
-.gc-sub { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace;
-          font-size: .78rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 500; }
+/* ---- ヘッダー：上に赤いルール ---- */
+.gc-title { font-size: 2.3rem; font-weight: 800; margin-bottom: 2px; color: #121212; }
+.gc-sub { color: #E3120B; font-family: 'IBM Plex Mono', monospace;
+          font-size: .78rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 600;
+          border-top: 3px solid #E3120B; display: inline-block; padding-top: 6px; }
 
-/* ---- 記事カード：紙の上の一段明るいカード ---- */
-.gc-card { background: #fbf8f0; border: 1px solid #e0d7c2;
-           border-left: 3px solid #c9bfa6; border-radius: 4px;
-           padding: 14px 20px; margin-bottom: 10px;
-           box-shadow: 0 1px 2px rgba(60,50,30,.06); transition: border-color .15s; }
-.gc-card:hover { border-left-color: #8a3a2e; }
+/* ---- 記事カード ---- */
+.gc-card { background: #ffffff; border: 1px solid #e2e2df;
+           border-left: 3px solid #d0d0cc; border-radius: 3px;
+           padding: 14px 20px; margin-bottom: 10px; transition: border-color .15s; }
+.gc-card:hover { border-left-color: #E3120B; }
 .gc-source { font-family: 'IBM Plex Mono', monospace; font-size: .68rem;
-             color: #9a8f78; text-transform: uppercase; letter-spacing: 1.5px; }
-.gc-headline { font-family: 'Spectral', serif; font-size: 1.15rem; color: #1c1813;
+             color: #8a8a8a; text-transform: uppercase; letter-spacing: 1.5px; }
+.gc-headline { font-family: 'Spectral', serif; font-size: 1.15rem; color: #121212;
                line-height: 1.35; margin: 5px 0 0 0; font-weight: 600; }
 
 /* ---- セクターチップ ---- */
@@ -553,45 +549,44 @@ h1, h2, h3, h4 { font-family: 'Spectral', serif; color: #1c1813 !important;
            font-size: .68rem; padding: 3px 9px; border-radius: 3px; margin: 2px 4px 2px 0;
            font-weight: 600; letter-spacing: .3px; }
 
-/* ---- THE ESSENCE ボックス ---- */
-.gc-essence { background: #f3ece0; border: 1px solid #d8cdb4;
-              border-left: 3px solid #8a3a2e; border-radius: 4px;
-              padding: 13px 17px; margin-top: 10px; }
-.gc-essence b { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .7rem;
+/* ---- THE ESSENCE / 含意ボックス ---- */
+.gc-essence { background: #f7f7f5; border: 1px solid #e2e2df;
+              border-left: 3px solid #E3120B; border-radius: 3px;
+              padding: 13px 17px; margin-top: 10px; color: #2b2b2b; }
+.gc-essence b { color: #E3120B; font-family: 'IBM Plex Mono', monospace; font-size: .7rem;
                 letter-spacing: 1.5px; }
-.gc-essence { color: #3a342a; }
 
-/* ---- 区切り線を細いインク色に ---- */
-hr { border-color: #d8cfb8 !important; }
+/* ---- 区切り線 ---- */
+hr { border-color: #d9d9d6 !important; }
 
 /* ---- フェーズ1: 一行サマリー（5秒で結論） ---- */
-.gc-brief { background: #fbf8f0; border: 1px solid #e0d7c2; border-left: 5px solid #8a8f78;
-            border-radius: 5px; padding: 13px 18px; margin: 4px 0 14px 0;
-            font-size: 1.02rem; color: #2a261f; box-shadow: 0 1px 3px rgba(60,50,30,.08); }
+.gc-brief { background: #ffffff; border: 1px solid #e2e2df; border-left: 5px solid #E3120B;
+            border-radius: 3px; padding: 13px 18px; margin: 4px 0 14px 0;
+            font-size: 1.02rem; color: #121212; }
 .gc-brief-tone { font-family: 'IBM Plex Mono', monospace; font-weight: 600;
                  font-size: .82rem; letter-spacing: .5px; }
-.gc-brief-sub { font-size: .8rem; color: #6b6354; margin-top: 5px;
+.gc-brief-sub { font-size: .8rem; color: #595959; margin-top: 5px;
                 font-family: 'Spectral', serif; }
 
 /* ---- フェーズ2: 連鎖（CHAIN）表示 ---- */
-.gc-chain { background: #f7f1e4; border: 1px solid #d8cdb4; border-left: 4px solid #8a3a2e;
-            border-radius: 5px; padding: 13px 17px; margin: 8px 0; }
-.gc-chain b { color: #8a3a2e; font-family: 'IBM Plex Mono', monospace; font-size: .74rem;
+.gc-chain { background: #f7f7f5; border: 1px solid #e2e2df; border-left: 4px solid #E3120B;
+            border-radius: 3px; padding: 13px 17px; margin: 8px 0; }
+.gc-chain b { color: #E3120B; font-family: 'IBM Plex Mono', monospace; font-size: .74rem;
               letter-spacing: 1px; }
 .gc-chain-body { margin-top: 8px; font-family: 'Spectral', serif; font-size: 1.02rem;
-                 line-height: 1.7; color: #2a261f; }
+                 line-height: 1.7; color: #121212; }
 
 /* ---- 記事＝展開バーを一体型カードに ---- */
-[data-testid="stExpander"] { background: #fbf8f0; border: 1px solid #e0d7c2 !important;
-                             border-left: 3px solid #8a3a2e !important; border-radius: 4px;
-                             margin-bottom: 9px; box-shadow: 0 1px 2px rgba(60,50,30,.06); }
+[data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
+                             border-left: 3px solid #E3120B !important; border-radius: 3px;
+                             margin-bottom: 9px; }
 [data-testid="stExpander"] summary { padding: 12px 16px; }
 [data-testid="stExpander"] summary p { font-family: 'Spectral', serif !important;
                                        font-size: 1.12rem !important; font-weight: 600 !important;
-                                       color: #1c1813 !important; line-height: 1.35; }
-[data-testid="stExpander"] summary:hover p { color: #8a3a2e !important; }
+                                       color: #121212 !important; line-height: 1.35; }
+[data-testid="stExpander"] summary:hover p { color: #E3120B !important; }
 
-/* ---- スマホ対応：狭い画面でタイトル縮小・余白調整・チップ折返し ---- */
+/* ---- スマホ対応 ---- */
 @media (max-width: 640px) {
   .gc-title { font-size: 1.5rem !important; line-height: 1.25; }
   .gc-sub { font-size: .62rem !important; letter-spacing: 1.5px; }

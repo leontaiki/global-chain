@@ -1,8 +1,8 @@
 [theme]
-# 端末のダーク/ライト設定に関わらず、常にこの紙色テーマで表示する
+# 端末のダーク/ライト設定に関わらず、常にこの白基調テーマで表示する（The Economist系）
 base = "light"
-primaryColor = "#8a3a2e"
-backgroundColor = "#f4efe3"
-secondaryBackgroundColor = "#ebe4d3"
-textColor = "#23201a"
+primaryColor = "#E3120B"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f2"
+textColor = "#121212"
 font = "serif"
