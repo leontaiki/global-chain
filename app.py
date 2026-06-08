@@ -64,72 +64,87 @@ DEFAULT_FEEDS = [
 
 # --- 18セクター定義 -----------------------------------------------------------
 # 企画書 "Global Chain Radio" の全18分野。
-# keywords: 記事の見出し・本文から拾う英語/日本語キーワード（小文字で照合）
+# strong = そのセクター固有の強い語（2点）。weak = 一般的で誤爆しやすい語（1点）。
+# ASCII語は単語境界一致、日本語は部分一致（classify_sectors 参照）。
 SECTORS = {
     "政治":       {"en": "Politics",      "color": "#c0392b",
-                   "keywords": ["election", "parliament", "congress", "senate", "vote", "democracy",
-                                "policy", "government", "minister", "president", "coalition", "populis",
-                                "referendum", "政治", "選挙", "政権"]},
+                   "strong": ["election", "parliament", "congress", "senate", "referendum",
+                              "democracy", "coalition", "政治", "選挙", "政権"],
+                   "weak": ["vote", "policy", "government", "minister", "president", "populis"]},
     "経済":       {"en": "Economy",       "color": "#d35400",
-                   "keywords": ["inflation", "gdp", "recession", "growth", "unemployment", "wages",
-                                "consumer", "cpi", "deflation", "stimulus", "tariff", "trade deficit",
-                                "経済", "物価", "景気"]},
+                   "strong": ["inflation", "gdp", "recession", "deflation", "cpi", "unemployment",
+                              "trade deficit", "経済", "物価", "景気"],
+                   "weak": ["growth", "wages", "consumer", "stimulus", "tariff"]},
     "金融":       {"en": "Finance",       "color": "#e67e22",
-                   "keywords": ["fed", "central bank", "rate", "yield", "bond", "treasury", "dollar",
-                                "currency", "stock", "equit", "credit", "bank", "liquidity", "ipo",
-                                "hedge fund", "金利", "為替", "債券", "株"]},
+                   "strong": ["central bank", "federal reserve", "treasury yield", "bond market",
+                              "stock market", "hedge fund", "ipo", "liquidity", "equit",
+                              "金利", "為替", "債券", "株"],
+                   "weak": ["fed", "rate", "yield", "bond", "dollar", "currency", "stock",
+                            "credit", "bank"]},
     "保険":       {"en": "Insurance",     "color": "#16a085",
-                   "keywords": ["insurance", "insurer", "reinsur", "actuari", "premium", "underwrit",
-                                "claims", "pension fund", "保険", "年金"]},
+                   "strong": ["insurance", "insurer", "reinsur", "actuari", "underwrit",
+                              "pension fund", "insurance claim", "保険", "年金"],
+                   "weak": ["premium"]},
     "医療":       {"en": "Healthcare",    "color": "#27ae60",
-                   "keywords": ["healthcare", "hospital", "drug", "pharma", "fda", "clinical", "patient",
-                                "medicine", "therapy", "biotech", "vaccine", "医療", "病院", "薬"]},
+                   "strong": ["healthcare", "hospital", "pharma", "fda", "clinical", "biotech",
+                              "medicine", "医療", "病院", "薬"],
+                   "weak": ["drug", "patient", "therapy"]},
     "公衆衛生":   {"en": "Public Health",  "color": "#2ecc71",
-                   "keywords": ["pandemic", "epidemic", "outbreak", "obesity", "mental health",
-                                "world health organization", "vaccine", "quarantine",
-                                "public health", "disease", "infection", "感染", "公衆衛生"]},
+                   "strong": ["pandemic", "epidemic", "outbreak", "obesity", "mental health",
+                              "world health organization", "quarantine", "public health",
+                              "disease", "infection", "感染", "公衆衛生"],
+                   "weak": ["vaccine"]},
     "食糧":       {"en": "Food",          "color": "#f1c40f",
-                   "keywords": ["wheat", "grain", "food security", "crop", "harvest", "famine",
-                                "fertilizer", "commodity", "食糧", "穀物", "小麦"]},
+                   "strong": ["wheat", "grain", "food security", "crop", "harvest", "famine",
+                              "fertilizer", "食糧", "穀物", "小麦"],
+                   "weak": ["commodity"]},
     "農業":       {"en": "Agriculture",   "color": "#a4b400",
-                   "keywords": ["farm", "agricultur", "irrigation", "livestock", "soybean", "subsid",
-                                "land use", "農業", "農地"]},
+                   "strong": ["agricultur", "irrigation", "livestock", "soybean", "farmland",
+                              "農業", "農地"],
+                   "weak": ["farm", "subsid", "land use"]},
     "エネルギー": {"en": "Energy",         "color": "#e74c3c",
-                   "keywords": ["oil", "gas", "opec", "crude", "lng", "nuclear", "renewable", "solar",
-                                "wind power", "grid", "electricity", "power plant", "uranium",
-                                "石油", "原子力", "電力", "エネルギー"]},
+                   "strong": ["opec", "crude oil", "lng", "nuclear", "renewable", "solar",
+                              "wind power", "electricity", "power plant", "uranium",
+                              "石油", "原子力", "電力", "エネルギー"],
+                   "weak": ["oil", "gas", "crude", "grid"]},
     "テック":     {"en": "Technology",    "color": "#3498db",
-                   "keywords": ["ai", "artificial intelligence", "semiconductor", "chip", "nvidia",
-                                "cloud", "data center", "software", "tech", "quantum", "robot",
-                                "半導体", "クラウド"]},
+                   "strong": ["artificial intelligence", "semiconductor", "nvidia", "data center",
+                              "quantum", "software", "半導体", "クラウド"],
+                   "weak": ["ai", "chip", "cloud", "tech", "robot"]},
     "宇宙":       {"en": "Space",         "color": "#34495e",
-                   "keywords": ["satellite", "space", "spacex", "nasa", "orbit", "rocket", "launch",
-                                "gps", "starlink", "衛星", "宇宙"]},
+                   "strong": ["satellite", "spacex", "nasa", "orbit", "rocket", "starlink",
+                              "space agency", "衛星", "宇宙"],
+                   "weak": ["space", "launch", "gps"]},
     "軍事":       {"en": "Military",      "color": "#7f8c8d",
-                   "keywords": ["military", "defense", "defence", "weapon", "missile", "army", "navy",
-                                "war", "conflict", "nato", "troops", "arms", "軍", "兵器", "防衛"]},
+                   "strong": ["military", "defense", "defence", "weapon", "missile", "army",
+                              "navy", "nato", "troops", "warfare", "軍", "兵器", "防衛"],
+                   "weak": ["war", "conflict", "arms"]},
     "外交":       {"en": "Diplomacy",     "color": "#2980b9",
-                   "keywords": ["diplomacy", "summit", "treaty", "sanction", "alliance", "bilateral",
-                                "embassy", "negotiation", "g7", "g20", "外交", "制裁", "条約"]},
+                   "strong": ["diplomacy", "treaty", "sanction", "alliance", "bilateral",
+                              "embassy", "g7", "g20", "外交", "制裁", "条約"],
+                   "weak": ["summit", "negotiation"]},
     "不動産":     {"en": "Real Estate",   "color": "#8e44ad",
-                   "keywords": ["real estate", "property", "housing", "mortgage", "office vacancy",
-                                "reit", "rent", "construction", "不動産", "住宅"]},
+                   "strong": ["real estate", "mortgage", "office vacancy", "reit",
+                              "housing market", "不動産", "住宅"],
+                   "weak": ["property", "housing", "rent", "construction"]},
     "アート":     {"en": "Art",           "color": "#9b59b6",
-                   "keywords": ["art", "auction", "sotheby", "christie", "museum", "gallery", "painting",
-                                "theatre", "theater", "broadway", "exhibition", "sculpture",
-                                "tony award", "tony awards", "美術", "アート", "演劇", "舞台"]},
+                   "strong": ["museum", "gallery", "sotheby", "christie", "painting", "theatre",
+                              "theater", "broadway", "exhibition", "sculpture", "tony award",
+                              "美術", "アート", "演劇", "舞台"],
+                   "weak": ["art", "auction"]},
     "ファッション":{"en": "Fashion",       "color": "#e84393",
-                   "keywords": ["fashion", "luxury", "lvmh", "apparel", "textile", "runway",
-                                "couture", "designer", "vogue", "catwalk", "haute couture",
-                                "ファッション", "ブランド", "ランウェイ"]},
+                   "strong": ["fashion", "lvmh", "apparel", "runway", "couture", "designer",
+                              "vogue", "catwalk", "haute couture", "ファッション", "ランウェイ"],
+                   "weak": ["luxury", "textile", "ブランド"]},
     "カルチャー": {"en": "Culture",       "color": "#fd79a8",
-                   "keywords": ["culture", "anime", "k-pop", "kpop", "film", "movie", "cinema",
-                                "video game", "gaming", "streaming", "music", "album", "concert",
-                                "festival", "celebrity", "box office", "grammy", "oscar",
-                                "soft power", "文化", "アニメ", "映画"]},
+                   "strong": ["anime", "k-pop", "kpop", "cinema", "video game", "box office",
+                              "grammy", "oscar", "concert", "festival", "soft power",
+                              "文化", "アニメ", "映画"],
+                   "weak": ["culture", "film", "movie", "gaming", "streaming", "music",
+                            "album", "celebrity"]},
     "地域":       {"en": "Local",         "color": "#636e72",
-                   "keywords": ["rural", "aging", "depopulation", "local economy", "vacant", "decline",
-                                "regional", "地方", "高齢化", "過疎"]},
+                   "strong": ["depopulation", "rural", "local economy", "地方", "高齢化", "過疎"],
+                   "weak": ["aging", "vacant", "decline", "regional"]},
 }
 
 
@@ -360,19 +375,23 @@ def _chip_text_color(hex_color: str) -> str:
 # =============================================================================
 
 def classify_sectors(text: str):
-    """記事テキストを18セクターに対しスコアリングし、(sector, score) を降順で返す。"""
+    """記事テキストを18セクターに対しスコアリングし、(sector, score) を降順で返す。
+    strong語=2点 / weak語=1点。英数字語は単語境界一致、日本語は部分一致。"""
     low = text.lower()
+
+    def _count(kw: str) -> int:
+        k = kw.lower()
+        if re.fullmatch(r"[a-z0-9 \-]+", k):
+            return len(re.findall(r"\b" + re.escape(k) + r"\b", low))
+        return low.count(k)
+
     scores = []
     for jp, meta in SECTORS.items():
         score = 0
-        for kw in meta["keywords"]:
-            k = kw.lower()
-            # 英数字のみのキーワードは「単語の区切り」で一致（ai が AIDS に誤一致しないように）
-            if re.fullmatch(r"[a-z0-9 \-]+", k):
-                score += len(re.findall(r"\b" + re.escape(k) + r"\b", low))
-            else:
-                # 日本語など（語境界の概念がない）は従来どおり部分一致
-                score += low.count(k)
+        for kw in meta.get("strong", []):
+            score += _count(kw) * 2
+        for kw in meta.get("weak", []):
+            score += _count(kw)
         if score > 0:
             scores.append((jp, score))
     scores.sort(key=lambda x: x[1], reverse=True)
