@@ -41,6 +41,13 @@ DEFAULT_FEEDS = [
     {"name": "NPR – World",          "url": "https://feeds.npr.org/1004/rss.xml"},
     {"name": "Al Jazeera",           "url": "https://www.aljazeera.com/xml/rss/all.xml"},
     {"name": "NYT – World",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"},
+    # ★ カルチャー＆ソフトパワー向け（映画・音楽・アート・ファッション・テック）
+    {"name": "The Guardian – Culture", "url": "https://www.theguardian.com/culture/rss"},
+    {"name": "The Guardian – Fashion", "url": "https://www.theguardian.com/fashion/rss"},
+    {"name": "BBC – Entertainment & Arts", "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"},
+    {"name": "NYT – Arts",           "url": "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml"},
+    {"name": "NPR – Pop Culture",    "url": "https://feeds.npr.org/1008/rss.xml"},
+    {"name": "BBC – Technology",     "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
     # 概要のみ（マクロ・金融の見出しカバー用。本文はペイウォール）
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
@@ -50,6 +57,7 @@ DEFAULT_FEEDS = [
 # 注: The Guardian と NPR は本文が完全無料で取得しやすく、全文取得の主力です。
 #     BBC・Al Jazeera も多くが取得可。NYT はメーター制のため記事により部分取得。
 #     FT/Bloomberg/Economist は本文ペイウォールのため概要のみ運用です。
+#     Culture/Fashion/Arts/Tech 系はカルチャービューで主役になります。
 
 
 # --- 18セクター定義 -----------------------------------------------------------
