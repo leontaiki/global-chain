@@ -522,10 +522,9 @@ st.markdown("""
 .stApp { background: #f4efe3; color: #23201a; }
 [data-testid="stMain"] { background: #f4efe3; }
 
-/* デプロイ版で上部に出る黒いツールバー/ヘッダーを消す */
-[data-testid="stToolbar"] { display: none !important; }
+/* 上部ヘッダー/ツールバーは残しつつ、黒い背景だけ紙色にする（機能は維持） */
 [data-testid="stHeader"] { background: #f4efe3 !important; }
-header[data-testid="stHeader"] { display: none !important; }
+[data-testid="stToolbar"] { background: transparent !important; }
 [data-testid="stSidebar"] { background: #ebe4d3; border-right: 1px solid #d8cfb8; }
 [data-testid="stSidebar"] * { color: #2c281f; }
 .stApp p, .stApp li, .stApp span, .stApp label, .stMarkdown { color: #3a342a; }
