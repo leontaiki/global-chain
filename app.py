@@ -521,6 +521,11 @@ st.markdown("""
 /* ---- 全体：紙のようなクリーム背景 + インク色の文字 ---- */
 .stApp { background: #f4efe3; color: #23201a; }
 [data-testid="stMain"] { background: #f4efe3; }
+
+/* デプロイ版で上部に出る黒いツールバー/ヘッダーを消す */
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stHeader"] { background: #f4efe3 !important; }
+header[data-testid="stHeader"] { display: none !important; }
 [data-testid="stSidebar"] { background: #ebe4d3; border-right: 1px solid #d8cfb8; }
 [data-testid="stSidebar"] * { color: #2c281f; }
 .stApp p, .stApp li, .stApp span, .stApp label, .stMarkdown { color: #3a342a; }
