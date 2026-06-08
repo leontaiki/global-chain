@@ -132,6 +132,7 @@ def fetch_article_body(url: str):
         h = raw.decode("utf-8", errors="ignore")
         
         meta = ""
+        # クォートの衝突を避けるため、文字コード ["'] (単・複引用符) を使用
         m = re.search(r'<meta[^>]+(property|name)=["'](og:description|description)["'][^>]*content=["']([^"']+)', h, re.I)
         if m: meta = html.unescape(m.group(3)).strip()
 
@@ -185,7 +186,7 @@ def classify_sectors(text: str):
     return scores
 
 # =============================================================================
-# 3. Gemini API 連携層 (無料枠・JSON Structured Output 最最適化)
+# 3. Gemini API 連携層 (無料枠・JSON Structured Output 最適化)
 # =============================================================================
 
 @st.cache_data(ttl=1800, show_spinner=False)
