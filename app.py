@@ -170,20 +170,10 @@ def _extract_entry_image(e) -> str:
 
 
 def _upgrade_image_res(url: str) -> str:
-    """低解像度サムネイルURLを、可能なら高解像度版に書き換える。
-    荒い画像を出さないため、主要メディアのサイズ指定を大きくする。"""
-    if not url:
-        return ""
-    # The Guardian: .../<width>.jpg や width=140 を大きく
-    url = re.sub(r"/(\d{2,4})\.(jpg|jpeg|png|webp)", r"/1000.\2", url)
-    url = re.sub(r"([?&]width=)\d+", r"\g<1>1000", url)
-    url = re.sub(r"([?&]quality=)\d+", r"\g<1>85", url)
-    # BBC: /news/240/.../ のようなサイズ指定を /news/1024/ に
-    url = re.sub(r"/(cpsprodpb|news)/(\d{2,4})/", r"/\1/1024/", url)
-    # NYT: ...-thumbStandard.jpg / -articleInline.jpg を -superJumbo に
-    url = re.sub(r"-(thumb\w*|articleInline|moth|master\d*)\.(jpg|jpeg|png)",
-                 r"-superJumbo.\2", url)
-    return url
+    """RSSが配る画像URLをそのまま使う。
+    （メディア別のURL書き換えによる高解像度化は誤爆でリンク切れを起こすため撤去。
+      画質改善が必要なら、確実に動くと検証できた方法だけを後から限定的に追加する。）"""
+    return url or ""
 
 
 @st.cache_data(ttl=900, show_spinner=False)  # 15分キャッシュ
