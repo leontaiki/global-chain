@@ -146,6 +146,29 @@ except ImportError:
     _SSL_CTX = ssl.create_default_context()
 
 
+def _extract_entry_image(e) -> str:
+    """RSSエントリから記事サムネイル画像URLを探す。無ければ空文字。"""
+    # 1) media:thumbnail / media:content（最も一般的）
+    for key in ("media_thumbnail", "media_content"):
+        items = e.get(key)
+        if items:
+            for it in items:
+                url = it.get("url")
+                if url:
+                    return url
+    # 2) enclosure（画像タイプのものだけ）
+    for enc in e.get("links", []):
+        if enc.get("rel") == "enclosure" and "image" in (enc.get("type") or ""):
+            if enc.get("href"):
+                return enc["href"]
+    # 3) 本文HTML内の最初の <img>
+    body = e.get("summary", e.get("description", "")) or ""
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', body, re.I)
+    if m:
+        return m.group(1)
+    return ""
+
+
 @st.cache_data(ttl=900, show_spinner=False)  # 15分キャッシュ
 def fetch_feed(url: str):
     """単一フィードを取得して (記事リスト, ステータス文字列) を返す。
@@ -164,6 +187,7 @@ def fetch_feed(url: str):
                 "link": e.get("link", ""),
                 "summary": _strip_html(e.get("summary", e.get("description", ""))),
                 "published": _parse_time(e),
+                "image": _extract_entry_image(e),
             })
         if not entries:
             # 取得はできたが記事が0件 → 理由をできるだけ伝える
@@ -669,6 +693,12 @@ hr { border-color: #d9d9d6 !important; }
 .gc-meta-txt { font-family: 'IBM Plex Mono', monospace; font-size: .66rem; color: #8a8a8a;
                letter-spacing: .5px; text-transform: uppercase; }
 
+/* ---- 記事サムネイル（ある記事だけ自然に表示） ---- */
+.gc-thumb { width: 100%; max-width: 420px; height: 180px; object-fit: cover;
+            border-radius: 4px; margin: 4px 0 2px 0; display: block;
+            border: 1px solid #e2e2df; }
+@media (max-width: 640px) { .gc-thumb { height: 150px; } }
+
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
                              border-left: 3px solid #E3120B !important; border-radius: 3px;
@@ -942,6 +972,13 @@ for idx, a in enumerate(all_articles):
         f'<span class="gc-meta-txt">{html.escape(a["source"])} · {meta_date}'
         f' · ⚡{impact_val} · {read_label}</span></div>',
         unsafe_allow_html=True)
+
+    # 画像がある記事だけ、サムネイルを自然に表示（無い記事はテキストのみ）
+    if a.get("image"):
+        st.markdown(
+            f'<img class="gc-thumb" src="{html.escape(a["image"])}" loading="lazy" '
+            f'onerror="this.style.display=\'none\'">',
+            unsafe_allow_html=True)
 
     # タイトル自体を展開バーにして、カードと要約を一体化する
     with st.expander(a["title"]):
