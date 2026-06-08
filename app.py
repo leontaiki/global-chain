@@ -725,7 +725,7 @@ hr { border-color: #d9d9d6 !important; }
                border-radius: 4px; overflow: hidden; margin-bottom: 12px;
                transition: box-shadow .15s; }
 .gc-hero-big:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); }
-.gc-hero-img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.gc-hero-img { width: 100%; height: 340px; object-fit: cover; display: block; }
 .gc-hero-body { padding: 14px 18px; }
 .gc-hero-kicker { margin-bottom: 6px; }
 .gc-hero-chip { font-family: 'IBM Plex Mono', monospace; font-size: .64rem; font-weight: 600;
@@ -738,12 +738,12 @@ hr { border-color: #d9d9d6 !important; }
               border-radius: 4px; overflow: hidden; height: 100%;
               transition: box-shadow .15s; }
 .gc-hero-sm:hover { box-shadow: 0 4px 16px rgba(0,0,0,.10); }
-.gc-hero-img-sm { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.gc-hero-img-sm { width: 100%; height: 160px; object-fit: cover; display: block; }
 .gc-hero-sm .gc-hero-kicker { padding: 10px 12px 0 12px; margin-bottom: 4px; }
 .gc-hero-title-sm { font-family: 'Spectral', serif; font-size: 1.05rem; font-weight: 600;
                     color: #121212; line-height: 1.3; padding: 0 12px 12px 12px; }
 .gc-hero-noimg { background: linear-gradient(135deg, #f0f0ee, #e2e2df); }
-@media (max-width: 640px) { .gc-hero-title { font-size: 1.2rem; } }
+@media (max-width: 640px) { .gc-hero-title { font-size: 1.2rem; } .gc-hero-img { height: 220px; } }
 
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
