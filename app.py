@@ -603,11 +603,16 @@ def gemini_analysis(text: str, title: str, api_key: str, model: str):
         gm = genai.GenerativeModel(model, system_instruction=system)
         resp = gm.generate_content(
             user,
-            generation_config={"temperature": 0.4, "max_output_tokens": 900},
+            generation_config={
+                "temperature": 0.4,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",  # JSONだけを強制出力
+            },
         )
-        out = (resp.text or "").replace("```json", "").replace("```", "").strip()
-        import json
-        return json.loads(out)
+        raw = (resp.text or "").replace("```json", "").replace("```", "").strip()
+        # 前後に余計な文字が付いても、最初の { から最後の } までを取り出す
+        m = re.search(r"\{.*\}", raw, re.S)
+        return json.loads(m.group(0) if m else raw)
     except Exception as ex:  # noqa: BLE001
         return {"error": str(ex)}
 
