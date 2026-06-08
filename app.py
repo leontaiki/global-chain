@@ -184,6 +184,34 @@ def is_free_fulltext(link: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in FREE_FULLTEXT_DOMAINS)
 
 
+def _extract_jsonld_body(h: str) -> str:
+    """JSON-LD 構造化データから articleBody を取り出す（最も確実）。"""
+    bodies = []
+    for m in re.finditer(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            h, re.S | re.I):
+        try:
+            data = json.loads(m.group(1).strip())
+        except Exception:  # noqa: BLE001
+            continue
+        stack = [data]
+        while stack:
+            o = stack.pop()
+            if isinstance(o, dict):
+                b = o.get("articleBody")
+                if isinstance(b, str) and len(b) > 200:
+                    bodies.append(b)
+                stack.extend(o.values())
+            elif isinstance(o, list):
+                stack.extend(o)
+    return html.unescape(max(bodies, key=len)).strip() if bodies else ""
+
+
+_NOISE_SNIPPETS = ("subscribe", "sign up", "newsletter", "advertisement",
+                   "cookie", "all rights reserved", "follow us", "sign in",
+                   "share this", "read more", "©")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)  # 1時間キャッシュ
 def fetch_article_body(url: str):
     """記事ページから本文を抽出して (本文テキスト, 理由) を返す。
@@ -193,34 +221,45 @@ def fetch_article_body(url: str):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-            raw = resp.read(800_000)  # 先頭800KBまで（巨大ページ対策）
+            raw = resp.read(1_200_000)  # 先頭1.2MBまで
         h = raw.decode("utf-8", errors="ignore")
 
-        # 1) og:description / meta description（記事の要旨が入っていることが多い）
-        meta = ""
-        m = re.search(
-            r'<meta[^>]+(?:property|name)=["\'](?:og:description|description)["\'][^>]*content=["\']([^"\']+)',
-            h, re.I)
-        if not m:
+        # 1) JSON-LD の articleBody（最優先・最も確実）
+        body = _extract_jsonld_body(h)
+
+        # 2) ダメなら、ノイズ要素を除いた上で <article> 領域の <p> を拾う
+        if len(body) < 200:
+            clean = re.sub(
+                r'<(script|style|noscript|nav|header|footer|aside|form|figure)[^>]*>.*?</\1>',
+                ' ', h, flags=re.S | re.I)
+            art = re.search(r'<article[^>]*>(.*?)</article>', clean, re.S | re.I)
+            region = art.group(1) if art else clean
+            seen, parts = set(), []
+            for p in re.findall(r"<p[^>]*>(.*?)</p>", region, re.S | re.I):
+                t = html.unescape(re.sub(r"<[^>]+>", "", p)).strip()
+                if len(t) < 40:
+                    continue
+                low = t.lower()
+                if any(b in low for b in _NOISE_SNIPPETS):
+                    continue
+                key = t[:60]
+                if key in seen:
+                    continue
+                seen.add(key)
+                parts.append(t)
+            body = " ".join(parts)
+
+        # 3) meta description で補完（本文が薄いとき）
+        if len(body) < 200:
             m = re.search(
-                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\'](?:og:description|description)',
+                r'<meta[^>]+(?:property|name)=["\'](?:og:description|description)["\'][^>]*content=["\']([^"\']+)',
                 h, re.I)
-        if m:
-            meta = html.unescape(m.group(1)).strip()
+            meta = html.unescape(m.group(1)).strip() if m else ""
+            body = (meta + " " + body).strip()
 
-        # 2) <p> 段落のうち、ある程度の長さ（=本文らしい）ものだけ連結
-        paras = re.findall(r"<p[^>]*>(.*?)</p>", h, re.S | re.I)
-        body_parts = []
-        for p in paras:
-            t = html.unescape(re.sub(r"<[^>]+>", "", p)).strip()
-            if len(t) >= 40:
-                body_parts.append(t)
-        body = " ".join(body_parts)
-
-        combined = (meta + " " + body).strip() if meta else body
-        if len(combined) < 80:
+        if len(body) < 80:
             return "", "本文を十分に抽出できませんでした（ペイウォール等の可能性）"
-        return combined[:6000], None  # 長すぎる場合は先頭6000字に制限
+        return body[:8000], None
     except urllib.error.HTTPError as ex:
         return "", f"HTTP {ex.code}"
     except Exception as ex:  # noqa: BLE001
@@ -344,53 +383,81 @@ def hypothesis_hint(scores):
 
 
 # =============================================================================
-# 3a. 引き算エンジン（フェーズ1）— 「今日効く度」スコアとリスクトーン
-#     広めのマクロ観測モード：18セクターを満遍なく拾いつつ、マクロ感応度で重み付け。
+# 3a. 引き算エンジン（フェーズ1）— ビュー別「効く度」スコアとトーン
+#     2つのビューで重み付けを切り替える：
+#       - マクロ投資 : 市場を動かす要因（金融・経済・エネルギー・軍事…）を重視
+#       - カルチャー : ソフトパワー（カルチャー・アート・ファッション・テック…）を重視
 # =============================================================================
 
-# マクロ（特に市場全体）への効きやすさ。アートやファッションは0でも、分類自体は残る。
-MACRO_WEIGHT = {
-    "金融": 3, "経済": 3, "エネルギー": 3, "軍事": 2, "外交": 2, "テック": 2,
-    "公衆衛生": 1, "食糧": 1, "農業": 1, "政治": 1, "宇宙": 1, "保険": 1,
-    "医療": 1, "不動産": 1, "地域": 1, "アート": 0, "ファッション": 0, "カルチャー": 0,
-}
-# 市場を動かす「シグナル語」。リスクオフ＝不安、リスクオン＝楽観の方向。
+# 市場を動かす「シグナル語」
 RISK_OFF_WORDS = ["war", "conflict", "sanction", "crisis", "crash", "recession",
                   "default", "attack", "invasion", "inflation", "rate hike",
                   "tariff", "shortage", "strike", "tension", "escalat"]
 RISK_ON_WORDS = ["rate cut", "ceasefire", "truce", "deal", "stimulus", "rally",
                  "recovery", "easing", "breakthrough", "agreement"]
-NOTABLE_THRESHOLD = 6  # これ以上を「今日効く記事」とみなす
+# 文化的な「話題」語
+BUZZ_WORDS = ["box office", "hit", "record", "award", "oscar", "grammy", "viral",
+              "trend", "sold out", "blockbuster", "debut", "launch", "premiere",
+              "collaboration", "streaming", "sensation", "anime", "k-pop", "festival"]
+
+VIEW_PROFILES = {
+    "マクロ投資": {
+        "weight": {
+            "金融": 4, "経済": 4, "エネルギー": 4, "軍事": 3, "外交": 2, "テック": 2,
+            "不動産": 2, "食糧": 1, "農業": 1, "政治": 1, "公衆衛生": 1, "宇宙": 1,
+            "保険": 1, "医療": 0, "地域": 0, "アート": 0, "ファッション": 0, "カルチャー": 0,
+        },
+        "pos": RISK_ON_WORDS, "neg": RISK_OFF_WORDS,
+        "threshold": 7,
+        "default_sector": "すべて",
+    },
+    "カルチャー＆ソフトパワー": {
+        "weight": {
+            "カルチャー": 4, "アート": 3, "ファッション": 3, "テック": 2, "地域": 2,
+            "医療": 1, "公衆衛生": 1, "政治": 1, "外交": 1, "食糧": 1, "宇宙": 1,
+            "不動産": 1, "金融": 1, "経済": 1, "農業": 0, "軍事": 0, "エネルギー": 0, "保険": 0,
+        },
+        "pos": BUZZ_WORDS, "neg": [],
+        "threshold": 4,
+        "default_sector": "すべて",
+    },
+}
 
 
-def impact_score(title: str, summary: str, scores):
-    """記事の『今日効く度』を返す。 (score, risk_off回数, risk_on回数)"""
+def impact_score(title: str, summary: str, scores, profile):
+    """記事の『効く度』を返す。 (score, pos回数, neg回数)"""
     text = f"{title} {summary}".lower()
+    weight = profile["weight"]
     s = 0.0
     for sec, _ in scores[:3]:
-        s += MACRO_WEIGHT.get(sec, 0)
-    off = sum(text.count(k) for k in RISK_OFF_WORDS)
-    on = sum(text.count(k) for k in RISK_ON_WORDS)
-    s += (off + on) * 1.5
+        s += weight.get(sec, 0)
+    pos = sum(text.count(k) for k in profile["pos"])
+    neg = sum(text.count(k) for k in profile["neg"])
+    s += (pos + neg) * 1.7
     if len(scores) >= 3:
         s += 2          # 連鎖が広い（複数セクターにまたがる）ほど重要
     elif len(scores) >= 2:
         s += 1
-    return s, off, on
+    return s, pos, neg
 
 
-def daily_brief(articles):
-    """画面最上部の一行サマリー用に、注目件数とリスクトーンを集計して返す。"""
-    notable = [a for a in articles if a.get("impact", 0) >= NOTABLE_THRESHOLD]
-    off = sum(a.get("risk_off", 0) for a in notable)
-    on = sum(a.get("risk_on", 0) for a in notable)
-    if on > off * 1.3:
-        tone, color = "リスクオン寄り", "#27ae60"
-    elif off > on * 1.3:
-        tone, color = "リスクオフ寄り", "#c0392b"
-    else:
-        tone, color = "中立", "#8a8f78"
-    return notable, tone, color
+def daily_brief(articles, profile):
+    """画面最上部の一行サマリー用に、注目件数とトーンを集計して返す。"""
+    th = profile["threshold"]
+    notable = [a for a in articles if a.get("impact", 0) >= th]
+    pos = sum(a.get("risk_on", 0) for a in notable)
+    neg = sum(a.get("risk_off", 0) for a in notable)
+    if not profile["neg"]:
+        # カルチャー：ネガ語が無いので「話題の活発さ」で判定
+        if pos >= 4:
+            return notable, "話題が活発", "#e84393"
+        return notable, "落ち着いた一日", "#8a8f78"
+    # マクロ：リスクオン/オフ
+    if pos > neg * 1.3:
+        return notable, "リスクオン寄り", "#27ae60"
+    elif neg > pos * 1.3:
+        return notable, "リスクオフ寄り", "#c0392b"
+    return notable, "中立", "#8a8f78"
 
 
 def build_llm_prompt(title: str, text: str, link: str) -> str:
@@ -627,6 +694,10 @@ st.divider()
 with st.sidebar:
     st.header("⚙️ 設定")
 
+    view = st.radio("📊 ビュー", list(VIEW_PROFILES.keys()),
+                    help="マクロ投資＝市場を動かす要因を重視。カルチャー＝ソフトパワー（文化・アート・ファッション）を重視。")
+    profile = VIEW_PROFILES[view]
+
     if "feeds" not in st.session_state:
         st.session_state.feeds = list(DEFAULT_FEEDS)
 
@@ -691,7 +762,7 @@ for f in active_feeds:
         e["source"] = f["name"]
         e["scores"] = scores
         e["primary"] = scores[0][0] if scores else "未分類"
-        imp, off, on = impact_score(e["title"], e["summary"], scores)
+        imp, off, on = impact_score(e["title"], e["summary"], scores, profile)
         e["impact"], e["risk_off"], e["risk_on"] = imp, off, on
         all_articles.append(e)
 
@@ -716,7 +787,7 @@ _dupes_removed = len(all_articles) - len(_deduped)
 all_articles = _deduped
 
 # 一行サマリーは「その日全体」で集計（フィルタで絞る前のスナップショット）
-_notable_all, _tone, _tone_color = daily_brief(all_articles)
+_notable_all, _tone, _tone_color = daily_brief(all_articles, profile)
 
 # まず新しい順に並べる（以降の並び替えは安定ソートなので、各グループ内は新しい順が保たれる）
 all_articles.sort(key=lambda x: x["published"], reverse=True)
@@ -732,7 +803,7 @@ elif sort_order == "今日効く度順":
 
 # ノイズ削減フィルタ（今日効く記事だけに絞る）
 if only_notable:
-    all_articles = [a for a in all_articles if a.get("impact", 0) >= NOTABLE_THRESHOLD]
+    all_articles = [a for a in all_articles if a.get("impact", 0) >= profile["threshold"]]
 
 # セクターフィルタ適用
 if selected_sector != "すべて":
