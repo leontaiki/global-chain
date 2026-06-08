@@ -51,12 +51,14 @@ DEFAULT_FEEDS = [
     # 概要のみ（マクロ・金融の見出しカバー用。本文はペイウォール）
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
-    {"name": "Reuters (見出しのみ)", "url": "https://news.google.com/rss/search?q=when:24h+site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "Bloomberg (見出しのみ)", "url": "https://news.google.com/rss/search?q=when:24h+site:bloomberg.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "CNBC – Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"},
+    {"name": "CNBC – Finance",       "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"},
+    {"name": "CNBC – Economy",       "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"},
 ]
 # 注: The Guardian と NPR は本文が完全無料で取得しやすく、全文取得の主力です。
 #     BBC・Al Jazeera も多くが取得可。NYT はメーター制のため記事により部分取得。
-#     FT/Bloomberg/Economist は本文ペイウォールのため概要のみ運用です。
+#     CNBC は直リンクで本文・画像が取得でき、金融/経済の主力です（Google News経由は廃止）。
+#     Economist/Foreign Affairs は本文ペイウォールのため概要のみ運用です。
 #     Culture/Fashion/Arts/Tech 系はカルチャービューで主役になります。
 
 
@@ -214,6 +216,7 @@ def fetch_feed(url: str):
 FREE_FULLTEXT_DOMAINS = (
     "bbc.co.uk", "bbc.com", "nytimes.com", "apnews.com",
     "npr.org", "theguardian.com", "reuters.com", "aljazeera.com",
+    "cnbc.com",
 )
 
 
