@@ -912,11 +912,34 @@ def _hero_kicker(a):
             f'color:{_chip_text_color(color)};">{sec}</span>' if sec else "")
     return f'{chip}<span class="gc-hero-src">{html.escape(a["source"])}　⚡{int(round(a.get("impact",0)))}</span>'
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _image_ok(url: str) -> bool:
+    """画像URLが実際に読み込めるか（200かつ画像）を確認する。死んでいれば False。"""
+    if not url:
+        return False
+    import urllib.request
+    import urllib.error
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _UA}, method=method)
+            with urllib.request.urlopen(req, timeout=6, context=_SSL_CTX) as r:
+                ct = (r.headers.get("Content-Type") or "").lower()
+                return getattr(r, "status", 200) == 200 and "image" in ct
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def _hero_img(a, cls):
-    if not a.get("image"):
-        return f'<div class="{cls} gc-hero-noimg"></div>'
-    return (f'<img class="{cls}" src="{html.escape(a["image"])}" loading="lazy" '
-            f'onerror="this.outerHTML=\'<div class=&quot;{cls} gc-hero-noimg&quot;></div>\'">')
+    """画像が生きていれば <img> を返す。無い/死んでいれば空文字（画像欄を出さない）。
+    Streamlitは class を除去するため、サイズ指定は style で直接当てる。"""
+    url = a.get("image")
+    if not url or not _image_ok(url):
+        return ""
+    h = 340 if cls == "gc-hero-img" else 160
+    style = (f"width:100%;height:{h}px;object-fit:cover;display:block;"
+             f"border-bottom:1px solid #e2e2df;")
+    return f'<img src="{html.escape(url)}" loading="lazy" style="{style}">'
 
 heroes = [a for a in sorted(all_articles, key=lambda x: x.get("impact", 0), reverse=True)
           if a.get("impact", 0) >= profile["threshold"]][:3]
@@ -1047,12 +1070,7 @@ for idx, a in enumerate(all_articles):
         f' · ⚡{impact_val} · {read_label}</span></div>',
         unsafe_allow_html=True)
 
-    # 画像がある記事だけ、サムネイルを自然に表示（無い記事はテキストのみ）
-    if a.get("image"):
-        st.markdown(
-            f'<img class="gc-thumb" src="{html.escape(a["image"])}" loading="lazy" '
-            f'onerror="this.style.display=\'none\'">',
-            unsafe_allow_html=True)
+    # 画像は「今日の主役」カードに集約。リストはテキスト中心ですっきり保つ。
 
     # タイトル自体を展開バーにして、カードと要約を一体化する
     with st.expander(a["title"]):
