@@ -890,6 +890,65 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+    # ---- 医療・サイエンスビュー専用：専門分野・論文検索 ----
+    if view == "医療・サイエンス":
+        st.divider()
+        st.subheader("🔬 専門分野・論文検索")
+
+        # PubMed キーワード検索
+        with st.expander("🔎 PubMed キーワードで検索"):
+            pubmed_q = st.text_input("検索ワード（英語）",
+                                     placeholder="例: COPD exacerbation RCT",
+                                     help="PubMedの検索構文が使えます（AND / OR / NOT）")
+            pubmed_count = st.slider("取得件数", 5, 30, 15, key="pubmed_count")
+            if st.button("このキーワードをフィードに追加", key="add_pubmed"):
+                if pubmed_q.strip():
+                    import urllib.parse
+                    encoded = urllib.parse.quote(pubmed_q.strip())
+                    url = (f"https://pubmed.ncbi.nlm.nih.gov/rss/search/"
+                           f"?term={encoded}&format=abstract&count={pubmed_count}")
+                    name = f"PubMed: {pubmed_q.strip()[:30]}"
+                    existing = {f["name"] for f in st.session_state.feeds}
+                    if name not in existing:
+                        st.session_state.feeds.append({"name": name, "url": url})
+                        st.cache_data.clear()
+                        st.success(f"追加しました: {name}")
+                        st.rerun()
+                    else:
+                        st.info("すでに追加済みです")
+
+        # 主要診療科プリセット（medRxiv専門分野フィード）
+        st.caption("📚 診療科プリセット（medRxiv・ワンタップ追加）")
+        SPECIALTY_PRESETS = [
+            ("呼吸器内科", "respiratory_medicine"),
+            ("皮膚科", "dermatology"),
+            ("腫瘍科", "oncology"),
+            ("循環器科", "cardiovascular"),
+            ("神経科", "neurology"),
+            ("感染症", "infectious_diseases"),
+            ("消化器科", "gastroenterology"),
+            ("内分泌代謝科", "endocrinology"),
+            ("精神科", "psychiatry"),
+            ("免疫・アレルギー", "allergy_immunology"),
+            ("整形外科", "orthopedics"),
+            ("救急・集中治療", "emergency_medicine"),
+        ]
+        existing_names = {f["name"] for f in st.session_state.feeds}
+        cols = st.columns(2)
+        for idx, (jp_name, subject) in enumerate(SPECIALTY_PRESETS):
+            url = f"https://connect.medrxiv.org/medrxiv_xml.php?subject={subject}"
+            feed_name = f"medRxiv: {jp_name}"
+            with cols[idx % 2]:
+                if feed_name in existing_names:
+                    st.button(f"✅ {jp_name}", key=f"preset_{subject}", disabled=True,
+                              use_container_width=True)
+                else:
+                    if st.button(f"＋ {jp_name}", key=f"preset_{subject}",
+                                 use_container_width=True):
+                        st.session_state.feeds.append({"name": feed_name, "url": url})
+                        st.cache_data.clear()
+                        st.rerun()
+
     st.divider()
     st.subheader("🤖 AI要約（Gemini API）")
     use_ai = st.toggle("本物のAI要約をONにする", value=False,
