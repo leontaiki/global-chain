@@ -561,8 +561,8 @@ def daily_brief(articles, profile):
     pos = sum(a.get("risk_on", 0) for a in notable)
     neg = sum(a.get("risk_off", 0) for a in notable)
     if not profile["neg"]:
-        # ネガ語が無いビュー（カルチャー・医療）：Buzz語の多さで判定
-        if pos >= 4:
+        # ネガ語が無いビュー（カルチャー・医療）：Buzz語が1件でもあれば「活発」
+        if pos >= 1:
             return notable, profile.get("tone_high", "話題が活発"), profile.get("tone_color_high", "#e84393")
         return notable, profile.get("tone_low", "落ち着いた一日"), profile.get("tone_color_low", "#8a8f78")
     # マクロ：リスクオン/オフ
@@ -1044,7 +1044,12 @@ if all_articles:
             '市場全体を動かすニュースは検出されていません。</div>',
             unsafe_allow_html=True)
     else:
-        top_titles = " ／ ".join(html.escape(a["title"][:46]) for a in _notable_all[:3])
+        # 医療ビューではBuzz語ヒット順（論文が上に来る）、それ以外はデフォルト順
+        if profile.get("neg") == [] and profile.get("tone_high") in ("注目の研究あり", "話題が活発"):
+            _candidates = sorted(_notable_all, key=lambda a: a.get("risk_on", 0), reverse=True)
+        else:
+            _candidates = _notable_all
+        top_titles = " ／ ".join(html.escape(a["title"][:46]) for a in _candidates[:3])
         st.markdown(
             f'<div class="gc-brief" style="border-left-color:{_tone_color};">'
             f'<span class="gc-brief-tone" style="color:{_tone_color};">● 全体トーン: {_tone}</span>'
