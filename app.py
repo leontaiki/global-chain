@@ -759,9 +759,14 @@ def gemini_analysis(text: str, title: str, api_key: str, model: str, view: str =
         return json.loads(m.group(0) if m else raw)
     except Exception as ex:  # noqa: BLE001
         msg = str(ex)
-        if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
-            return {"error": "無料枠の上限に達しました。少し時間をおくか、"
-                             "サイドバーのモデルを Flash-Lite（無料枠が広い）に切り替えてください。"}
+        low = msg.lower()
+        if "429" in msg or "quota" in low or "rate" in low:
+            # 1分あたり(RPM)か1日(RPD)かでメッセージを出し分ける
+            if "per minute" in low or "perminute" in low or "rpm" in low:
+                return {"error": "短時間に呼びすぎました（毎分の制限）。1分ほど待って再実行してください。"}
+            return {"error": "Geminiの無料枠（1日あたり）を使い切った可能性があります。"
+                             "枠は太平洋時間の深夜（日本時間の夕方〜夜）にリセットされます。"
+                             "それまで待つか、Google Cloudで課金を有効にすると上限なく使えます。"}
         return {"error": msg}
 
 
