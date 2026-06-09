@@ -48,15 +48,13 @@ DEFAULT_FEEDS = [
     {"name": "NYT – Arts",           "url": "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml"},
     {"name": "NPR – Pop Culture",    "url": "https://feeds.npr.org/1008/rss.xml"},
     {"name": "BBC – Technology",     "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
-    # ★ 医療・サイエンス向け（論文＋プレプリント＋医療ニュース）
+    # ★ 医療・サイエンス向け（論文ジャーナル＋医療ニュース）
     {"name": "STAT News",           "url": "https://www.statnews.com/feed/"},
     {"name": "NEJM",                "url": "https://www.nejm.org/action/showFeed?jc=nejmoa&type=etoc&feed=rss"},
     {"name": "The Lancet",          "url": "https://www.thelancet.com/rssfeed/lancet_online.xml"},
     {"name": "JAMA",                "url": "https://jamanetwork.com/rss/site_3/67.xml"},
     {"name": "BMJ",                 "url": "https://www.bmj.com/rss/thebmj.xml"},
     {"name": "Nature Medicine",     "url": "https://www.nature.com/nm.rss"},
-    {"name": "medRxiv",             "url": "https://connect.medrxiv.org/medrxiv_xml.php?subject=all"},
-    {"name": "bioRxiv",             "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=all"},
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
     {"name": "CNBC – Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"},
@@ -295,6 +293,41 @@ def _extract_jsonld_body(h: str) -> str:
 _NOISE_SNIPPETS = ("subscribe", "sign up", "newsletter", "advertisement",
                    "cookie", "all rights reserved", "follow us", "sign in",
                    "share this", "read more", "©")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)  # 30分キャッシュ
+def fetch_pubmed(query: str, n: int = 15):
+    """PubMed E-utilities で論文を検索し、最新順にメタ情報を返す。
+    返り値: [{title, link, source(誌名), pubdate}], エラー時は []"""
+    import urllib.request
+    import urllib.parse
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    q = urllib.parse.quote(query)
+    try:
+        es = f"{base}/esearch.fcgi?db=pubmed&term={q}&retmax={n}&sort=date&retmode=json"
+        req = urllib.request.Request(es, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as r:
+            ids = json.loads(r.read()).get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            return []
+        su = f"{base}/esummary.fcgi?db=pubmed&id={','.join(ids)}&retmode=json"
+        req2 = urllib.request.Request(su, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req2, timeout=15, context=_SSL_CTX) as r:
+            result = json.loads(r.read()).get("result", {})
+        papers = []
+        for pmid in ids:
+            rec = result.get(pmid)
+            if not rec:
+                continue
+            papers.append({
+                "title": (rec.get("title") or "").rstrip("."),
+                "link": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "source": rec.get("fulljournalname") or rec.get("source", "PubMed"),
+                "pubdate": rec.get("pubdate", ""),
+            })
+        return papers
+    except Exception:  # noqa: BLE001
+        return []
 
 
 @st.cache_data(ttl=3600, show_spinner=False)  # 1時間キャッシュ
@@ -818,6 +851,16 @@ hr { border-color: #d9d9d6 !important; }
 .gc-hero-noimg { background: linear-gradient(135deg, #f0f0ee, #e2e2df); }
 @media (max-width: 640px) { .gc-hero-title { font-size: 1.2rem; } .gc-hero-img { height: 220px; } }
 
+/* ---- PubMed論文カード ---- */
+.gc-paper { border-left: 3px solid #2980b9; background: #f7f9fb;
+            border: 1px solid #e2e2df; border-left: 3px solid #2980b9;
+            border-radius: 3px; padding: 10px 14px; margin-bottom: 7px; }
+.gc-paper-meta { font-family: 'IBM Plex Mono', monospace; font-size: .66rem; color: #2980b9;
+                 text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
+.gc-paper-title { font-family: 'Spectral', serif; font-size: 1.02rem; font-weight: 600;
+                  color: #121212; line-height: 1.35; text-decoration: none; }
+.gc-paper-title:hover { color: #2980b9; }
+
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
                              border-left: 3px solid #E3120B !important; border-radius: 3px;
@@ -890,64 +933,46 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    # ---- 医療・サイエンスビュー専用：専門分野・論文検索 ----
+    # ---- 医療・サイエンスビュー専用：専門分野・論文検索（PubMed） ----
     if view == "医療・サイエンス":
         st.divider()
         st.subheader("🔬 専門分野・論文検索")
+        st.caption("PubMedから最新論文を検索し、画面上部に独立表示します。")
 
-        # PubMed キーワード検索
-        with st.expander("🔎 PubMed キーワードで検索"):
-            pubmed_q = st.text_input("検索ワード（英語）",
-                                     placeholder="例: COPD exacerbation RCT",
-                                     help="PubMedの検索構文が使えます（AND / OR / NOT）")
-            pubmed_count = st.slider("取得件数", 5, 30, 15, key="pubmed_count")
-            if st.button("このキーワードをフィードに追加", key="add_pubmed"):
-                if pubmed_q.strip():
-                    import urllib.parse
-                    encoded = urllib.parse.quote(pubmed_q.strip())
-                    url = (f"https://pubmed.ncbi.nlm.nih.gov/rss/search/"
-                           f"?term={encoded}&format=abstract&count={pubmed_count}")
-                    name = f"PubMed: {pubmed_q.strip()[:30]}"
-                    existing = {f["name"] for f in st.session_state.feeds}
-                    if name not in existing:
-                        st.session_state.feeds.append({"name": name, "url": url})
-                        st.cache_data.clear()
-                        st.success(f"追加しました: {name}")
-                        st.rerun()
-                    else:
-                        st.info("すでに追加済みです")
+        if "med_query" not in st.session_state:
+            st.session_state.med_query = ""
 
-        # 主要診療科プリセット（medRxiv専門分野フィード）
-        st.caption("📚 診療科プリセット（medRxiv・ワンタップ追加）")
+        med_input = st.text_input("検索ワード（英語）",
+                                  value=st.session_state.med_query,
+                                  placeholder="例: COPD exacerbation",
+                                  help="PubMed構文OK（AND / OR / NOT、\"...\"[journal] など）")
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            if st.button("🔎 検索", use_container_width=True, key="med_search"):
+                st.session_state.med_query = med_input.strip()
+                st.rerun()
+        with c2:
+            if st.button("クリア", use_container_width=True, key="med_clear"):
+                st.session_state.med_query = ""
+                st.rerun()
+
+        st.caption("📚 診療科プリセット（タップで検索）")
         SPECIALTY_PRESETS = [
-            ("呼吸器内科", "respiratory_medicine"),
-            ("皮膚科", "dermatology"),
-            ("腫瘍科", "oncology"),
-            ("循環器科", "cardiovascular"),
-            ("神経科", "neurology"),
-            ("感染症", "infectious_diseases"),
-            ("消化器科", "gastroenterology"),
-            ("内分泌代謝科", "endocrinology"),
-            ("精神科", "psychiatry"),
-            ("免疫・アレルギー", "allergy_immunology"),
-            ("整形外科", "orthopedics"),
-            ("救急・集中治療", "emergency_medicine"),
+            ("呼吸器", "respiratory medicine"), ("皮膚科", "dermatology"),
+            ("腫瘍", "oncology"), ("循環器", "cardiology"),
+            ("神経", "neurology"), ("感染症", "infectious disease"),
+            ("消化器", "gastroenterology"), ("内分泌", "endocrinology"),
+            ("精神科", "psychiatry"), ("免疫", "immunology allergy"),
+            ("整形外科", "orthopedics"), ("救急集中", "critical care medicine"),
         ]
-        existing_names = {f["name"] for f in st.session_state.feeds}
-        cols = st.columns(2)
-        for idx, (jp_name, subject) in enumerate(SPECIALTY_PRESETS):
-            url = f"https://connect.medrxiv.org/medrxiv_xml.php?subject={subject}"
-            feed_name = f"medRxiv: {jp_name}"
-            with cols[idx % 2]:
-                if feed_name in existing_names:
-                    st.button(f"✅ {jp_name}", key=f"preset_{subject}", disabled=True,
-                              use_container_width=True)
-                else:
-                    if st.button(f"＋ {jp_name}", key=f"preset_{subject}",
-                                 use_container_width=True):
-                        st.session_state.feeds.append({"name": feed_name, "url": url})
-                        st.cache_data.clear()
-                        st.rerun()
+        pcols = st.columns(2)
+        for idx, (jp_name, term) in enumerate(SPECIALTY_PRESETS):
+            with pcols[idx % 2]:
+                active_mark = "✅ " if st.session_state.med_query == term else ""
+                if st.button(f"{active_mark}{jp_name}", key=f"sp_{term}",
+                             use_container_width=True):
+                    st.session_state.med_query = term
+                    st.rerun()
 
     st.divider()
     st.subheader("🤖 AI要約（Gemini API）")
@@ -1093,6 +1118,26 @@ def _hero_img(a, cls):
     style = (f"width:100%;height:{h}px;object-fit:cover;display:block;"
              f"border-bottom:1px solid #e2e2df;")
     return f'<img src="{html.escape(url)}" loading="lazy" style="{style}">'
+
+# ---- 医療・サイエンス：PubMed論文検索の結果を独立表示 ----
+if view == "医療・サイエンス" and st.session_state.get("med_query"):
+    q = st.session_state.med_query
+    st.markdown(f'<div class="gc-hero-label">🔬 論文検索: {html.escape(q)}</div>',
+                unsafe_allow_html=True)
+    with st.spinner(f"PubMedで「{q}」を検索中…"):
+        papers = fetch_pubmed(q, 15)
+    if not papers:
+        st.info("該当する論文が見つかりませんでした。キーワードを変えてみてください。")
+    else:
+        st.caption(f"PubMed 最新 {len(papers)} 件（新しい順）")
+        for p in papers:
+            st.markdown(
+                f'<div class="gc-paper">'
+                f'<div class="gc-paper-meta">{html.escape(p["source"])} · {html.escape(p["pubdate"])}</div>'
+                f'<a class="gc-paper-title" href="{html.escape(p["link"])}" target="_blank" rel="noopener">'
+                f'{html.escape(p["title"])}</a></div>',
+                unsafe_allow_html=True)
+    st.divider()
 
 heroes = [a for a in sorted(all_articles, key=lambda x: x.get("impact", 0), reverse=True)
           if a.get("impact", 0) >= profile["threshold"]][:3]
