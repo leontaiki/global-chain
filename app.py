@@ -305,8 +305,8 @@ _NOISE_SNIPPETS = ("subscribe", "sign up", "newsletter", "advertisement",
 
 @st.cache_data(ttl=1800, show_spinner=False)  # 30分キャッシュ
 def fetch_pubmed(query: str, n: int = 15):
-    """PubMed E-utilities で論文を検索し、最新順にメタ情報を返す。
-    返り値: [{title, link, source(誌名), pubdate}], エラー時は []"""
+    """PubMed E-utilities で論文を検索し、最新順にメタ情報＋要約を返す。
+    返り値: [{title, link, source(誌名), pubdate, abstract}], エラー時は []"""
     import urllib.request
     import urllib.parse
     base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -322,6 +322,27 @@ def fetch_pubmed(query: str, n: int = 15):
         req2 = urllib.request.Request(su, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req2, timeout=15, context=_SSL_CTX) as r:
             result = json.loads(r.read()).get("result", {})
+
+        # アブストラクトをまとめて取得（efetch・XML）してPMIDごとに紐付け
+        abstracts = {}
+        try:
+            ef = f"{base}/efetch.fcgi?db=pubmed&id={','.join(ids)}&rettype=abstract&retmode=xml"
+            req3 = urllib.request.Request(ef, headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req3, timeout=20, context=_SSL_CTX) as r:
+                xml = r.read().decode("utf-8", errors="ignore")
+            # <PubmedArticle> 単位で分割し、PMIDと AbstractText を対応づける
+            for chunk in re.split(r"<PubmedArticle>", xml)[1:]:
+                mpmid = re.search(r"<PMID[^>]*>(\d+)</PMID>", chunk)
+                if not mpmid:
+                    continue
+                parts = re.findall(r"<AbstractText[^>]*>(.*?)</AbstractText>", chunk, re.S)
+                text = " ".join(re.sub(r"<[^>]+>", "", p) for p in parts)
+                text = html.unescape(text).strip()
+                if text:
+                    abstracts[mpmid.group(1)] = text
+        except Exception:  # noqa: BLE001
+            pass  # 要約が取れなくてもタイトルは出す
+
         papers = []
         for pmid in ids:
             rec = result.get(pmid)
@@ -332,6 +353,7 @@ def fetch_pubmed(query: str, n: int = 15):
                 "link": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source": rec.get("fulljournalname") or rec.get("source", "PubMed"),
                 "pubdate": rec.get("pubdate", ""),
+                "abstract": abstracts.get(pmid, ""),
             })
         return papers
     except Exception:  # noqa: BLE001
@@ -902,6 +924,8 @@ hr { border-color: #d9d9d6 !important; }
 .gc-paper-title { font-family: 'Spectral', serif; font-size: 1.02rem; font-weight: 600;
                   color: #121212; line-height: 1.35; text-decoration: none; }
 .gc-paper-title:hover { color: #2980b9; }
+.gc-abstract { font-family: 'Spectral', serif; font-size: .92rem; line-height: 1.6;
+               color: #2b2b2b; }
 
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
@@ -1187,6 +1211,11 @@ if view == "医療・サイエンス" and st.session_state.get("med_query"):
                 f'<a class="gc-paper-title" href="{html.escape(p["link"])}" target="_blank" rel="noopener">'
                 f'{html.escape(p["title"])}</a></div>',
                 unsafe_allow_html=True)
+            if p.get("abstract"):
+                with st.expander("要約（アブストラクト）を読む"):
+                    st.markdown(
+                        f'<div class="gc-abstract">{html.escape(p["abstract"])}</div>',
+                        unsafe_allow_html=True)
     st.divider()
 
 heroes = [a for a in sorted(all_articles, key=lambda x: x.get("impact", 0), reverse=True)
