@@ -857,6 +857,12 @@ with st.sidebar:
 
     if "feeds" not in st.session_state:
         st.session_state.feeds = list(DEFAULT_FEEDS)
+    else:
+        # 新しくDEFAULT_FEEDSに追加されたフィードを、既存セッションにも自動で追加する
+        existing_names = {f["name"] for f in st.session_state.feeds}
+        for f in DEFAULT_FEEDS:
+            if f["name"] not in existing_names:
+                st.session_state.feeds.append(f)
 
     st.subheader("📡 RSSフィード")
     feed_labels = [f["name"] for f in st.session_state.feeds]
