@@ -48,7 +48,15 @@ DEFAULT_FEEDS = [
     {"name": "NYT – Arts",           "url": "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml"},
     {"name": "NPR – Pop Culture",    "url": "https://feeds.npr.org/1008/rss.xml"},
     {"name": "BBC – Technology",     "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
-    # 概要のみ（マクロ・金融の見出しカバー用。本文はペイウォール）
+    # ★ 医療・サイエンス向け（論文＋プレプリント＋医療ニュース）
+    {"name": "STAT News",           "url": "https://www.statnews.com/feed/"},
+    {"name": "NEJM",                "url": "https://www.nejm.org/action/showFeed?jc=nejmoa&type=etoc&feed=rss"},
+    {"name": "The Lancet",          "url": "https://www.thelancet.com/rssfeed/lancet_online.xml"},
+    {"name": "JAMA",                "url": "https://jamanetwork.com/rss/site_3/67.xml"},
+    {"name": "BMJ",                 "url": "https://www.bmj.com/rss/thebmj.xml"},
+    {"name": "Nature Medicine",     "url": "https://www.nature.com/nm.rss"},
+    {"name": "medRxiv",             "url": "https://connect.medrxiv.org/medrxiv_xml.php?subject=all"},
+    {"name": "bioRxiv",             "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=all"},
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
     {"name": "CNBC – Top News",     "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"},
@@ -251,7 +259,7 @@ def fetch_feed(url: str):
 FREE_FULLTEXT_DOMAINS = (
     "bbc.co.uk", "bbc.com", "nytimes.com", "apnews.com",
     "npr.org", "theguardian.com", "reuters.com", "aljazeera.com",
-    "cnbc.com",
+    "cnbc.com", "statnews.com",
 )
 
 
@@ -481,6 +489,13 @@ BUZZ_WORDS = ["box office", "hit", "record", "award", "oscar", "grammy", "viral"
               "trend", "sold out", "blockbuster", "debut", "launch", "premiere",
               "collaboration", "streaming", "sensation", "anime", "k-pop", "festival"]
 
+# 医療・科学系の「注目語」（論文・承認・試験）
+MEDICAL_BUZZ = ["clinical trial", "phase 3", "phase 2", "fda approval", "fda approved",
+                "meta-analysis", "randomized", "rct", "placebo", "double-blind",
+                "peer-reviewed", "breakthrough therapy", "efficacy", "approval",
+                "primary endpoint", "survival benefit", "significant reduction",
+                "systematic review", "nejm", "lancet", "jama", "nature medicine"]
+
 VIEW_PROFILES = {
     "マクロ投資": {
         "weight": {
@@ -490,6 +505,9 @@ VIEW_PROFILES = {
         },
         "pos": RISK_ON_WORDS, "neg": RISK_OFF_WORDS,
         "threshold": 7,
+        "tone_high": "リスクオン寄り", "tone_low": "リスクオフ寄り",
+        "tone_neutral": "中立",
+        "tone_color_high": "#27ae60", "tone_color_low": "#c0392b", "tone_color_neutral": "#8a8f78",
         "default_sector": "すべて",
     },
     "カルチャー＆ソフトパワー": {
@@ -500,6 +518,20 @@ VIEW_PROFILES = {
         },
         "pos": BUZZ_WORDS, "neg": [],
         "threshold": 4,
+        "tone_high": "話題が活発", "tone_low": "落ち着いた一日",
+        "tone_color_high": "#e84393", "tone_color_low": "#8a8f78",
+        "default_sector": "すべて",
+    },
+    "医療・サイエンス": {
+        "weight": {
+            "医療": 4, "公衆衛生": 4, "テック": 2, "政治": 1, "経済": 1, "保険": 1,
+            "食糧": 1, "農業": 0, "金融": 0, "エネルギー": 0, "軍事": 0, "外交": 0,
+            "不動産": 0, "アート": 0, "ファッション": 0, "カルチャー": 0, "地域": 0, "宇宙": 0,
+        },
+        "pos": MEDICAL_BUZZ, "neg": [],
+        "threshold": 3,
+        "tone_high": "注目の研究あり", "tone_low": "静かな週",
+        "tone_color_high": "#2980b9", "tone_color_low": "#8a8f78",
         "default_sector": "すべて",
     },
 }
@@ -529,16 +561,16 @@ def daily_brief(articles, profile):
     pos = sum(a.get("risk_on", 0) for a in notable)
     neg = sum(a.get("risk_off", 0) for a in notable)
     if not profile["neg"]:
-        # カルチャー：ネガ語が無いので「話題の活発さ」で判定
+        # ネガ語が無いビュー（カルチャー・医療）：Buzz語の多さで判定
         if pos >= 4:
-            return notable, "話題が活発", "#e84393"
-        return notable, "落ち着いた一日", "#8a8f78"
+            return notable, profile.get("tone_high", "話題が活発"), profile.get("tone_color_high", "#e84393")
+        return notable, profile.get("tone_low", "落ち着いた一日"), profile.get("tone_color_low", "#8a8f78")
     # マクロ：リスクオン/オフ
     if pos > neg * 1.3:
-        return notable, "リスクオン寄り", "#27ae60"
+        return notable, profile.get("tone_high", "リスクオン寄り"), profile.get("tone_color_high", "#27ae60")
     elif neg > pos * 1.3:
-        return notable, "リスクオフ寄り", "#c0392b"
-    return notable, "中立", "#8a8f78"
+        return notable, profile.get("tone_low", "リスクオフ寄り"), profile.get("tone_color_low", "#c0392b")
+    return notable, profile.get("tone_neutral", "中立"), profile.get("tone_color_neutral", "#8a8f78")
 
 
 def build_llm_prompt(title: str, text: str, link: str) -> str:
