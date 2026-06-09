@@ -50,10 +50,9 @@ DEFAULT_FEEDS = [
     {"name": "BBC – Technology",     "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
     # ★ 医療・サイエンス向け（論文ジャーナル＋医療ニュース）
     {"name": "STAT News",           "url": "https://www.statnews.com/feed/"},
-    {"name": "NEJM",                "url": "https://www.nejm.org/action/showFeed?jc=nejmoa&type=etoc&feed=rss"},
+    {"name": "NEJM",                "url": "https://www.nejm.org/action/showFeed?jc=nejm&type=etoc&feed=rss"},
     {"name": "The Lancet",          "url": "https://www.thelancet.com/rssfeed/lancet_online.xml"},
     {"name": "JAMA",                "url": "https://jamanetwork.com/rss/site_3/67.xml"},
-    {"name": "BMJ",                 "url": "https://www.bmj.com/rss/thebmj.xml"},
     {"name": "Nature Medicine",     "url": "https://www.nature.com/nm.rss"},
     {"name": "Foreign Affairs",      "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Economist – Finance", "url": "https://www.economist.com/finance-and-economics/rss.xml"},
@@ -901,11 +900,19 @@ with st.sidebar:
     if "feeds" not in st.session_state:
         st.session_state.feeds = list(DEFAULT_FEEDS)
     else:
-        # 新しくDEFAULT_FEEDSに追加されたフィードを、既存セッションにも自動で追加する
+        # DEFAULT_FEEDS と同期：新規は追加、同名はURLを最新に更新
+        default_by_name = {f["name"]: f["url"] for f in DEFAULT_FEEDS}
         existing_names = {f["name"] for f in st.session_state.feeds}
+        for f in st.session_state.feeds:
+            if f["name"] in default_by_name:
+                f["url"] = default_by_name[f["name"]]   # 壊れたURLを修正
         for f in DEFAULT_FEEDS:
             if f["name"] not in existing_names:
                 st.session_state.feeds.append(f)
+        # 既定から外したフィード（壊れていたBMJ等）を掃除
+        _retired = {"BMJ", "medRxiv", "bioRxiv"}
+        st.session_state.feeds = [f for f in st.session_state.feeds
+                                  if f["name"] not in _retired]
 
     st.subheader("📡 RSSフィード")
     feed_labels = [f["name"] for f in st.session_state.feeds]
