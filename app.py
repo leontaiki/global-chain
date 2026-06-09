@@ -163,6 +163,17 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
        "AppleWebKit/537.36 (KHTML, like Gecko) "
        "Chrome/124.0 Safari/537.36")
 
+# ブラウザに近いヘッダー一式（NPR等のクラウドIPブロック回避を試みる用）
+_BROWSER_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+              "application/rss+xml,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "identity",
+    "Cache-Control": "no-cache",
+    "Referer": "https://www.google.com/",
+}
+
 # Mac等でよく起きる SSL: CERTIFICATE_VERIFY_FAILED を防ぐため、
 # certifi のルート証明書を使ったSSLコンテキストを用意する。
 import ssl
@@ -225,7 +236,7 @@ def fetch_feed(url: str):
     import urllib.request
     import urllib.error
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        req = urllib.request.Request(url, headers=_BROWSER_HEADERS)
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             raw = resp.read()
         parsed = feedparser.parse(raw)
