@@ -38,7 +38,6 @@ DEFAULT_FEEDS = [
     {"name": "The Guardian – World", "url": "https://www.theguardian.com/world/rss"},
     {"name": "BBC – World",          "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
     {"name": "BBC – Business",       "url": "https://feeds.bbci.co.uk/news/business/rss.xml"},
-    {"name": "NPR – World",          "url": "https://feeds.npr.org/1004/rss.xml"},
     {"name": "Al Jazeera",           "url": "https://www.aljazeera.com/xml/rss/all.xml"},
     {"name": "NYT – World",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"},
     # ★ カルチャー＆ソフトパワー向け（映画・音楽・アート・ファッション・テック）
@@ -46,7 +45,6 @@ DEFAULT_FEEDS = [
     {"name": "The Guardian – Fashion", "url": "https://www.theguardian.com/fashion/rss"},
     {"name": "BBC – Entertainment & Arts", "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"},
     {"name": "NYT – Arts",           "url": "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml"},
-    {"name": "NPR – Pop Culture",    "url": "https://feeds.npr.org/1008/rss.xml"},
     {"name": "BBC – Technology",     "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
     # ★ 医療・サイエンス向け（論文ジャーナル＋医療ニュース）
     {"name": "STAT News",           "url": "https://www.statnews.com/feed/"},
@@ -921,7 +919,7 @@ with st.sidebar:
             if f["name"] not in existing_names:
                 st.session_state.feeds.append(f)
         # 既定から外したフィード（壊れていたBMJ等）を掃除
-        _retired = {"BMJ", "medRxiv", "bioRxiv"}
+        _retired = {"BMJ", "medRxiv", "bioRxiv", "NPR – World", "NPR – Pop Culture"}
         st.session_state.feeds = [f for f in st.session_state.feeds
                                   if f["name"] not in _retired]
 
