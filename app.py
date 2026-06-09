@@ -675,9 +675,10 @@ def copy_button(text: str, key: str, label: str = "📋 プロンプトをコピ
 # =============================================================================
 
 @st.cache_data(ttl=86400, show_spinner=False)  # 同一テキストは24時間キャッシュ（呼び出し抑制）
-def gemini_analysis(text: str, title: str, api_key: str, model: str):
+def gemini_analysis(text: str, title: str, api_key: str, model: str, view: str = "マクロ投資"):
     """記事を Global Chain Radio 形式に再構成して返す。
-    戻り値: dict(theme, takeaways[3], essence, sectors[]) または {'error': ...}"""
+    医療・サイエンスビューでは臨床医・研究者向けの分析に切り替える。
+    戻り値: dict(theme, chain[], risk_tone, sectors[], index_implication) または {'error': ...}"""
     try:
         import google.generativeai as genai
     except ImportError:
@@ -685,17 +686,45 @@ def gemini_analysis(text: str, title: str, api_key: str, model: str):
     if not api_key:
         return {"error": "APIキーが未設定です（サイドバーで入力してください）"}
 
-    system = (
-        "You are the lead writer of 'Global Chain Radio', an English radio program produced "
-        "by a doctor in Japan. The program reads each day's news not as an isolated dot, but as "
-        "a point on the lines and planes of global supply chains and history. You connect "
-        "politics, economics, finance, health, food, energy, technology, space, the military, "
-        "diplomacy, and culture as one interdependent system (the 'Chain'). Your tone is dense, "
-        "structural, and analytical, in the style of The Economist. You always reframe a news "
-        "item by asking: where does this sit in the global chain, and what historical pattern "
-        "does it echo?"
-    )
-    user = f"""次の英語ニュースを、Global Chain Radio の視点で分析してください。
+    if view == "医療・サイエンス":
+        system = (
+            "You are a senior physician-scientist writing a concise briefing for busy clinicians. "
+            "For each paper or medical news item, you assess three things together: (1) clinical "
+            "impact — how this could change practice; (2) strength of evidence — study design, "
+            "sample size, endpoints, and key limitations; (3) where the field is heading next. "
+            "You are rigorous and avoid hype: you flag preliminary or low-quality evidence clearly. "
+            "You write for an expert audience (a practicing doctor in Japan)."
+        )
+        user = f"""次の医学論文・医療ニュースを、臨床医・研究者向けに分析してください。
+「連鎖（chain）」は、エビデンスが臨床・研究へどう波及するかの流れとして示すこと。
+例：「ctDNA陽性大腸がんで術後化学療法の上乗せ効果が限定的（phase 3, N=○） → 過剰治療の見直し → ctDNAガイド下の治療選択が普及 → 次世代の個別化試験へ」。
+誇張を避け、研究デザインの限界（観察研究/小規模/代替エンドポイント等）があれば明示すること。
+
+# 出力は JSON のみ（前置き・コードブロック・説明文は禁止）
+{{
+  "theme": "研究の要点を一文で（40字以内）",
+  "chain": ["結果/エビデンス", "臨床的解釈", "診療への影響", "今後の研究・展開"],
+  "risk_tone": "エビデンスの強さを『強い / 中等度 / 限定的・予備的』のいずれかで",
+  "sectors": ["関連する診療領域・分野を2〜4個（例: 腫瘍, 消化器, 公衆衛生）"],
+  "index_implication": "臨床医への一言：明日からの診療にどう効くか。過大評価を避け限界にも触れる（80字以内）"
+}}
+
+# 記事
+タイトル: {title}
+本文: {text[:5000]}
+"""
+    else:
+        system = (
+            "You are the lead writer of 'Global Chain Radio', an English radio program produced "
+            "by a doctor in Japan. The program reads each day's news not as an isolated dot, but as "
+            "a point on the lines and planes of global supply chains and history. You connect "
+            "politics, economics, finance, health, food, energy, technology, space, the military, "
+            "diplomacy, and culture as one interdependent system (the 'Chain'). Your tone is dense, "
+            "structural, and analytical, in the style of The Economist. You always reframe a news "
+            "item by asking: where does this sit in the global chain, and what historical pattern "
+            "does it echo?"
+        )
+        user = f"""次の英語ニュースを、Global Chain Radio の視点で分析してください。
 最重要は「連鎖（chain）」です。出来事が市場・セクターへどう波及するかを、因果のドミノとして具体的に示すこと。
 例：「軍事衝突 → ホルムズ海峡の海運リスク → 原油↑ → インフレ再燃 → 金利↑ → グロース株に逆風／防衛・エネルギー関連に追い風 → リスクオフ」。
 推測が混じる場合は断定しすぎず、ただし因果の方向（↑↓）は明示すること。
@@ -1316,19 +1345,31 @@ for idx, a in enumerate(all_articles):
                 if not api_key:
                     st.info("サイドバーで GEMINI_API_KEY を入力するとAI要約が有効になります。")
                 else:
-                    with st.spinner("Global Chain Radio 形式で分析中…"):
-                        result = gemini_analysis(analysis_text, a["title"], api_key, ai_model)
+                    _spin = ("臨床・エビデンス分析中…" if view == "医療・サイエンス"
+                             else "Global Chain Radio 形式で分析中…")
+                    with st.spinner(_spin):
+                        result = gemini_analysis(analysis_text, a["title"], api_key, ai_model, view)
                     if "error" in result:
                         st.error(f"AI要約エラー: {result['error']}")
                     else:
-                        st.markdown(f"**🎙️ Today's Theme**　{result.get('theme','')}")
+                        _is_med = (view == "医療・サイエンス")
+                        _theme_label = "📋 研究の要点" if _is_med else "🎙️ Today's Theme"
+                        _chain_label = "🔗 臨床への波及" if _is_med else "🔗 連鎖（CHAIN）"
+                        _secs_label = "関連領域" if _is_med else "波及セクター"
+                        _impl_label = "🩺 臨床医への一言" if _is_med else "📊 インデックス投資家への含意"
+                        st.markdown(f"**{_theme_label}**　{result.get('theme','')}")
 
-                        # 🔗 連鎖（CHAIN）— このアプリの主役
+                        # 🔗 連鎖（CHAIN）/ 臨床への波及 — このアプリの主役
                         chain = result.get("chain", [])
                         if chain:
                             tone = result.get("risk_tone", "")
-                            tone_color = ("#27ae60" if "オン" in tone
-                                          else "#c0392b" if "オフ" in tone else "#8a8f78")
+                            if _is_med:
+                                tone_color = ("#27ae60" if "強い" in tone
+                                              else "#8a8f78" if "限定" in tone or "予備" in tone
+                                              else "#e67e22")
+                            else:
+                                tone_color = ("#27ae60" if "オン" in tone
+                                              else "#c0392b" if "オフ" in tone else "#8a8f78")
                             steps = '<span style="color:#8a3a2e;font-weight:700;"> → </span>'.join(
                                 html.escape(str(s)) for s in chain)
                             tone_badge = (f'<span style="background:{tone_color};color:#fff;'
@@ -1336,18 +1377,18 @@ for idx, a in enumerate(all_articles):
                                           f'font-family:IBM Plex Mono,monospace;">{html.escape(tone)}</span>'
                                           if tone else "")
                             st.markdown(
-                                f'<div class="gc-chain"><b>🔗 連鎖（CHAIN）</b>　{tone_badge}'
+                                f'<div class="gc-chain"><b>{_chain_label}</b>　{tone_badge}'
                                 f'<div class="gc-chain-body">{steps}</div></div>',
                                 unsafe_allow_html=True)
 
                         secs = "・".join(result.get("sectors", []))
                         if secs:
-                            st.markdown(f"**波及セクター**：{secs}")
+                            st.markdown(f"**{_secs_label}**：{secs}")
 
                         impl = result.get("index_implication", "")
                         if impl:
                             st.markdown(
-                                f'<div class="gc-essence"><b>📊 インデックス投資家への含意</b><br>'
+                                f'<div class="gc-essence"><b>{_impl_label}</b><br>'
                                 f'{html.escape(impl)}</div>',
                                 unsafe_allow_html=True)
                         if link:
