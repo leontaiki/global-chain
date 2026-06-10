@@ -324,22 +324,28 @@ def fetch_pubmed(query: str, n: int = 15):
             result = json.loads(r.read()).get("result", {})
 
         # アブストラクトをまとめて取得（efetch・XML）してPMIDごとに紐付け
+        # セクション構造を保つため [(label, text), ...] の形で保存
         abstracts = {}
         try:
             ef = f"{base}/efetch.fcgi?db=pubmed&id={','.join(ids)}&rettype=abstract&retmode=xml"
             req3 = urllib.request.Request(ef, headers={"User-Agent": _UA})
             with urllib.request.urlopen(req3, timeout=20, context=_SSL_CTX) as r:
                 xml = r.read().decode("utf-8", errors="ignore")
-            # <PubmedArticle> 単位で分割し、PMIDと AbstractText を対応づける
+            # <PubmedArticle> 単位で分割し、PMIDと AbstractText（ラベル付き）を対応づける
             for chunk in re.split(r"<PubmedArticle>", xml)[1:]:
                 mpmid = re.search(r"<PMID[^>]*>(\d+)</PMID>", chunk)
                 if not mpmid:
                     continue
-                parts = re.findall(r"<AbstractText[^>]*>(.*?)</AbstractText>", chunk, re.S)
-                text = " ".join(re.sub(r"<[^>]+>", "", p) for p in parts)
-                text = html.unescape(text).strip()
-                if text:
-                    abstracts[mpmid.group(1)] = text
+                sections = []
+                for m in re.finditer(r"<AbstractText([^>]*)>(.*?)</AbstractText>", chunk, re.S):
+                    attrs, body = m.group(1), m.group(2)
+                    lbl = re.search(r'Label="([^"]*)"', attrs)
+                    label = (lbl.group(1).strip().title() if lbl else "")
+                    txt = html.unescape(re.sub(r"<[^>]+>", "", body)).strip()
+                    if txt:
+                        sections.append((label, txt))
+                if sections:
+                    abstracts[mpmid.group(1)] = sections
         except Exception:  # noqa: BLE001
             pass  # 要約が取れなくてもタイトルは出す
 
@@ -353,11 +359,58 @@ def fetch_pubmed(query: str, n: int = 15):
                 "link": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source": rec.get("fulljournalname") or rec.get("source", "PubMed"),
                 "pubdate": rec.get("pubdate", ""),
-                "abstract": abstracts.get(pmid, ""),
+                "abstract": abstracts.get(pmid, []),  # [(label, text), ...]
             })
         return papers
     except Exception:  # noqa: BLE001
         return []
+
+
+# 結論・主要結果を示す手がかり語（重要文ハイライト用）
+_KEY_CUES = (
+    "we found", "we conclude", "in conclusion", "significant", "significantly",
+    "associated with", "no significant", "compared with", "compared to",
+    "demonstrated", "results show", "these findings", "suggest that",
+    "was higher", "was lower", "reduced", "increased", "improved",
+    "primary outcome", "hazard ratio", "odds ratio", "risk ratio",
+)
+_CONCLUSION_LABELS = ("Conclusion", "Conclusions", "Interpretation", "Significance")
+
+
+def _highlight_sentences(text: str) -> str:
+    """結論・主要結果らしい文を太字に。英語のまま読みやすくする（API不要）。"""
+    # 文単位に粗く分割（略語のピリオドで切れすぎないよう最小限）
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    out = []
+    for s in sentences:
+        esc = html.escape(s)
+        low = s.lower()
+        if any(cue in low for cue in _KEY_CUES):
+            out.append(f"<b>{esc}</b>")
+        else:
+            out.append(esc)
+    return " ".join(out)
+
+
+def render_abstract(sections):
+    """構造化アブストラクトを、結論ファースト＋見出し太字＋重要文強調で表示するHTMLを返す。
+    sections: [(label, text), ...]"""
+    if not sections:
+        return ""
+    # 結論セクションを最初に大きく見せる
+    concl = [(lab, txt) for lab, txt in sections if lab in _CONCLUSION_LABELS]
+    rest = [(lab, txt) for lab, txt in sections if lab not in _CONCLUSION_LABELS]
+
+    html_parts = []
+    if concl:
+        body = " ".join(_highlight_sentences(t) for _, t in concl)
+        html_parts.append(
+            f'<div class="gc-abs-concl"><span class="gc-abs-concl-tag">CONCLUSION</span>'
+            f'<div>{body}</div></div>')
+    for lab, txt in rest:
+        head = (f'<div class="gc-abs-head">{html.escape(lab)}</div>' if lab else "")
+        html_parts.append(f'{head}<div class="gc-abs-sec">{_highlight_sentences(txt)}</div>')
+    return "".join(html_parts)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)  # 1時間キャッシュ
@@ -926,6 +979,17 @@ hr { border-color: #d9d9d6 !important; }
 .gc-paper-title:hover { color: #2980b9; }
 .gc-abstract { font-family: 'Spectral', serif; font-size: .92rem; line-height: 1.6;
                color: #2b2b2b; }
+.gc-abs-concl { background: #fbf7ee; border-left: 4px solid #E3120B; border-radius: 3px;
+                padding: 10px 14px; margin-bottom: 12px; }
+.gc-abs-concl-tag { display: inline-block; font-family: 'IBM Plex Mono', monospace;
+                    font-size: .62rem; letter-spacing: 1px; color: #E3120B; font-weight: 700;
+                    margin-bottom: 4px; }
+.gc-abs-concl div { font-size: .97rem; line-height: 1.65; }
+.gc-abs-head { font-family: 'IBM Plex Mono', monospace; font-size: .66rem; letter-spacing: 1px;
+               text-transform: uppercase; color: #6b6f63; font-weight: 700;
+               margin: 10px 0 2px; }
+.gc-abs-sec { margin-bottom: 6px; }
+.gc-abstract b { color: #121212; font-weight: 700; }
 
 /* ---- 記事＝展開バーを一体型カードに ---- */
 [data-testid="stExpander"] { background: #ffffff; border: 1px solid #e2e2df !important;
@@ -1204,7 +1268,7 @@ if view == "医療・サイエンス" and st.session_state.get("med_query"):
         st.info("該当する論文が見つかりませんでした。キーワードを変えてみてください。")
     else:
         st.caption(f"PubMed 最新 {len(papers)} 件（新しい順）")
-        for p in papers:
+        for i, p in enumerate(papers):
             st.markdown(
                 f'<div class="gc-paper">'
                 f'<div class="gc-paper-meta">{html.escape(p["source"])} · {html.escape(p["pubdate"])}</div>'
@@ -1214,8 +1278,48 @@ if view == "医療・サイエンス" and st.session_state.get("med_query"):
             if p.get("abstract"):
                 with st.expander("要約（アブストラクト）を読む"):
                     st.markdown(
-                        f'<div class="gc-abstract">{html.escape(p["abstract"])}</div>',
+                        f'<div class="gc-abstract">{render_abstract(p["abstract"])}</div>',
                         unsafe_allow_html=True)
+                # 🩺 その場で臨床分析（Gemini）
+                if st.button("🩺 臨床分析", key=f"pmanalyze_{i}"):
+                    if not api_key:
+                        st.info("サイドバーで「本物のAI要約をONにする」を有効にし、"
+                                "GEMINI_API_KEY を入力すると臨床分析が使えます。")
+                    else:
+                        _abs_text = " ".join(
+                            f"{lab}: {txt}" if lab else txt for lab, txt in p["abstract"])
+                        with st.spinner("臨床・エビデンス分析中…"):
+                            res = gemini_analysis(_abs_text, p["title"],
+                                                  api_key, ai_model, "医療・サイエンス")
+                        if "error" in res:
+                            st.error(f"AI分析エラー: {res['error']}")
+                        else:
+                            st.markdown(f"**📋 研究の要点**　{res.get('theme','')}")
+                            ch = res.get("chain", [])
+                            if ch:
+                                tone = res.get("risk_tone", "")
+                                tcol = ("#27ae60" if "強い" in tone
+                                        else "#8a8f78" if "限定" in tone or "予備" in tone
+                                        else "#e67e22")
+                                steps = '<span style="color:#8a3a2e;font-weight:700;"> → </span>'.join(
+                                    html.escape(str(s)) for s in ch)
+                                badge = (f'<span style="background:{tcol};color:#fff;font-size:.7rem;'
+                                         f'padding:2px 8px;border-radius:3px;'
+                                         f'font-family:IBM Plex Mono,monospace;">{html.escape(tone)}</span>'
+                                         if tone else "")
+                                st.markdown(
+                                    f'<div class="gc-chain"><b>🔗 臨床への波及</b>　{badge}'
+                                    f'<div class="gc-chain-body">{steps}</div></div>',
+                                    unsafe_allow_html=True)
+                            secs = "・".join(res.get("sectors", []))
+                            if secs:
+                                st.markdown(f"**関連領域**：{secs}")
+                            impl = res.get("index_implication", "")
+                            if impl:
+                                st.markdown(
+                                    f'<div class="gc-essence"><b>🩺 臨床医への一言</b><br>'
+                                    f'{html.escape(impl)}</div>',
+                                    unsafe_allow_html=True)
     st.divider()
 
 heroes = [a for a in sorted(all_articles, key=lambda x: x.get("impact", 0), reverse=True)
